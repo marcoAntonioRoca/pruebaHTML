@@ -1,0 +1,579 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Decision Making Agent - Chat con OCR</title>
+    
+    <!-- CORS y Security Headers -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://www.gstatic.com https://dialogflow.cloud.google.com; style-src 'self' 'unsafe-inline' https://www.gstatic.com; connect-src 'self' https://dialogflow.cloud.google.com https://*.googleapis.com https://n8n.fastxo.org; frame-src 'self' https://dialogflow.cloud.google.com; img-src 'self' data: https:;">
+    
+    <link rel="stylesheet" href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }
+
+        .chat-container {
+            width: 100%;
+            max-width: 900px;
+            height: 90vh;
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 0;
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.3);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .chat-header {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 1.5rem;
+            text-align: center;
+            position: relative;
+        }
+
+        .chat-title {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0;
+        }
+
+        .back-button {
+            position: absolute;
+            top: 50%;
+            left: 20px;
+            transform: translateY(-50%);
+            background: rgba(255, 255, 255, 0.2);
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 5px;
+            transition: all 0.3s ease;
+            backdrop-filter: blur(10px);
+        }
+
+        .back-button:hover {
+            background: rgba(255, 255, 255, 0.3);
+            color: white;
+            text-decoration: none;
+        }
+
+        .chat-content {
+            height: calc(90vh - 80px);
+            position: relative;
+        }
+
+        /* ESTILOS PARA DIALOGFLOW MESSENGER */
+        df-messenger {
+            z-index: 999 !important;
+            position: absolute !important;
+            --df-messenger-font-color: #000 !important;
+            --df-messenger-font-family: Google Sans !important;
+            --df-messenger-chat-background: #f3f6fc !important;
+            --df-messenger-message-user-background: #d3e3fd !important;
+            --df-messenger-message-bot-background: #fff !important;
+            bottom: 0 !important;
+            right: 0 !important;
+            top: 0 !important;
+            left: 0 !important;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        /* BOTÓN DE IMAGEN OCR */
+        .ocr-button {
+            position: absolute !important;
+            bottom: 25px !important;
+            right: 240px !important;
+            width: 50px !important;
+            height: 40px !important;
+            background: #34a853 !important;
+            border: none !important;
+            border-radius: 20px !important;
+            color: white !important;
+            font-size: 20px !important;
+            cursor: pointer !important;
+            z-index: 9999 !important;
+            transition: all 0.2s ease !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1) !important;
+        }
+
+        .ocr-button:hover {
+            background: #2d8e47 !important;
+            transform: scale(1.05) !important;
+        }
+
+        .ocr-button.processing {
+            background: #ff9800 !important;
+            animation: pulse 1.5s infinite !important;
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.1); opacity: 0.8; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        /* BOTÓN DE GRABACIÓN */
+        .mic-button {
+            position: absolute !important;
+            bottom: 25px !important;
+            right: 120px !important;
+            width: auto !important;
+            min-width: 100px !important;
+            height: 40px !important;
+            background: #4285f4 !important;
+            border: none !important;
+            border-radius: 20px !important;
+            color: white !important;
+            font-size: 14px !important;
+            font-weight: 500 !important;
+            cursor: pointer !important;
+            z-index: 9999 !important;
+            transition: all 0.2s ease !important;
+            display: flex !important;
+            align-items: center !important;
+            justify-content: center !important;
+            gap: 8px !important;
+            padding: 0 16px !important;
+        }
+
+        .mic-button:hover {
+            background: #3367d6 !important;
+        }
+
+        .mic-button.recording {
+            background: #ea4335 !important;
+            animation: none !important;
+        }
+
+        .mic-icon {
+            width: 16px !important;
+            height: 16px !important;
+            fill: currentColor !important;
+        }
+
+        .timer {
+            font-family: monospace !important;
+            font-size: 13px !important;
+        }
+
+        /* INPUT FILE OCULTO */
+        .file-input {
+            display: none !important;
+        }
+
+        /* PREVIEW DE IMAGEN */
+        .image-preview {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            max-width: 200px;
+            max-height: 150px;
+            border-radius: 10px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            z-index: 10000;
+            background: white;
+            padding: 5px;
+            display: none;
+        }
+
+        .preview-close {
+            position: absolute;
+            top: -10px;
+            right: -10px;
+            width: 25px;
+            height: 25px;
+            border-radius: 50%;
+            background: #ea4335;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-size: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        /* NOTIFICACIÓN */
+        .notification {
+            position: absolute;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #4285f4;
+            color: white;
+            padding: 12px 24px;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: 500;
+            z-index: 10001;
+            display: none;
+            animation: slideDown 0.3s ease;
+        }
+
+        .notification.success {
+            background: #34a853;
+        }
+
+        .notification.error {
+            background: #ea4335;
+        }
+
+        @keyframes slideDown {
+            from { transform: translateX(-50%) translateY(-20px); opacity: 0; }
+            to { transform: translateX(-50%) translateY(0); opacity: 1; }
+        }
+
+        /* ERROR CORS */
+        .cors-error {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            color: #e74c3c;
+            background: rgba(231, 76, 60, 0.1);
+            padding: 2rem;
+            border-radius: 15px;
+            border: 2px solid #e74c3c;
+            max-width: 80%;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <a href="javascript:history.back()" class="back-button">
+                ← Go Back
+            </a>
+            <div class="chat-title">Decision Making Agent con OCR</div>
+        </div>
+
+        <div class="chat-content">
+            <!-- NOTIFICACIÓN -->
+            <div class="notification" id="notification"></div>
+
+            <!-- PREVIEW DE IMAGEN -->
+            <div class="image-preview" id="imagePreview">
+                <button class="preview-close" onclick="closePreview()">×</button>
+                <img id="previewImg" alt="Preview" style="width: 100%; height: 100%; object-fit: cover; border-radius: 5px;">
+            </div>
+
+            <!-- ERROR CORS MESSAGE -->
+            <div class="cors-error" id="corsError">
+                <h3>🚫 Error CORS 403</h3>
+                <p><strong>Message:</strong> You do not have the permissions to use this agent</p>
+            </div>
+
+            <!-- DIALOGFLOW MESSENGER -->
+            <df-messenger
+              location="us-central1"
+              project-id="n8n-hosting-468801"
+              agent-id="dad2305c-df40-4b98-93f2-207dc07188de"
+              language-code="en"
+              max-query-length="-1"
+              allow-feedback="false"
+              enable-audio-input="true"
+              chat-icon="https://cdn-icons-png.flaticon.com/512/4712/4712027.png">
+              <df-messenger-chat
+                chat-title="DecisionMakingAgent con OCR"
+                placeholder-text="Type your message or upload an image...">
+              </df-messenger-chat>
+            </df-messenger>
+
+            <!-- BOTÓN OCR PARA SUBIR IMÁGENES -->
+            <button class="ocr-button" id="ocrButton" onclick="document.getElementById('imageInput').click()" title="Subir imagen para extraer texto">
+                📷
+            </button>
+            <input type="file" id="imageInput" class="file-input" accept="image/*" onchange="handleImageUpload(event)">
+
+            <!-- BOTÓN DE GRABACIÓN -->
+            <button class="mic-button" id="micButton">
+                <svg class="mic-icon" viewBox="0 0 24 24">
+                    <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
+                    <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
+                </svg>
+                <span id="micText">Record</span>
+            </button>
+        </div>
+    </div>
+
+    <script src="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/df-messenger.js"></script>
+    <script>
+        // CONFIGURACIÓN
+        const OCR_WEBHOOK_URL = 'https://n8n.fastxo.org/webhook/extract-text';
+        
+        // VARIABLES GLOBALES
+        let dfMessenger;
+        let mediaRecorder;
+        let audioChunks = [];
+        let isRecording = false;
+        let startTime;
+        let timerInterval;
+
+        // INICIALIZACIÓN
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🚀 Inicializando chat con OCR...');
+            
+            // Esperar a que se cargue el Dialogflow Messenger
+            setTimeout(() => {
+                dfMessenger = document.querySelector('df-messenger');
+                if (dfMessenger) {
+                    console.log('✅ Dialogflow Messenger cargado');
+                    
+                    // Agregar mensaje de bienvenida con instrucciones de OCR
+                    setTimeout(() => {
+                        sendSystemMessage('¡Hola! Puedes escribir mensajes normalmente o subir imágenes usando el botón 📷 para extraer texto automáticamente.');
+                    }, 1000);
+                }
+            }, 2000);
+            
+            // Configurar micrófono
+            setupMicrophone();
+        });
+
+        // FUNCIÓN PRINCIPAL DE OCR
+        async function handleImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            console.log('📸 Imagen seleccionada:', file.name);
+            
+            // Mostrar preview
+            showImagePreview(file);
+            
+            // Cambiar estado del botón
+            const ocrButton = document.getElementById('ocrButton');
+            ocrButton.classList.add('processing');
+            ocrButton.innerHTML = '⏳';
+            
+            // Mostrar notificación
+            showNotification('Procesando imagen...', 'info');
+
+            try {
+                // Preparar FormData para el webhook
+                const formData = new FormData();
+                formData.append('file', file);
+
+                // Enviar a tu webhook n8n
+                const response = await fetch(OCR_WEBHOOK_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                console.log('📄 Respuesta del webhook OCR:', result);
+
+                if (result.success && result.extractedText) {
+                    // Mostrar texto extraído en notificación
+                    showNotification('✅ Texto extraído correctamente!', 'success');
+                    
+                    // Preparar mensaje con texto extraído
+                    const message = `Imagen procesada: "${file.name}"\n\nTexto extraído:\n${result.extractedText}`;
+                    
+                    // Enviar el texto extraído como mensaje al chat
+                    setTimeout(() => {
+                        sendMessageToChat(message);
+                        closePreview();
+                    }, 1500);
+                    
+                } else {
+                    showNotification('❌ No se pudo extraer texto de la imagen', 'error');
+                    console.error('Error en OCR:', result);
+                }
+
+            } catch (error) {
+                showNotification('❌ Error procesando imagen: ' + error.message, 'error');
+                console.error('Error en handleImageUpload:', error);
+            } finally {
+                // Restaurar botón
+                ocrButton.classList.remove('processing');
+                ocrButton.innerHTML = '📷';
+                
+                // Limpiar input
+                event.target.value = '';
+            }
+        }
+
+        // ENVIAR MENSAJE AL CHAT DE DIALOGFLOW
+        function sendMessageToChat(message) {
+            if (dfMessenger) {
+                try {
+                    // Método 1: Usar renderCustomText si está disponible
+                    if (typeof dfMessenger.renderCustomText === 'function') {
+                        dfMessenger.renderCustomText(message, true);
+                    }
+                    // Método 2: Disparar evento personalizado
+                    else {
+                        const event = new CustomEvent('df-request-sent', {
+                            detail: { requestBody: { queryInput: { text: { text: message } } } }
+                        });
+                        dfMessenger.dispatchEvent(event);
+                    }
+                    
+                    console.log('💬 Mensaje enviado al chat:', message.substring(0, 100) + '...');
+                } catch (error) {
+                    console.error('Error enviando mensaje al chat:', error);
+                    // Fallback: mostrar en consola
+                    alert('Texto extraído: ' + message);
+                }
+            } else {
+                console.error('❌ Dialogflow Messenger no disponible');
+                alert('Texto extraído: ' + message);
+            }
+        }
+
+        // ENVIAR MENSAJE DEL SISTEMA
+        function sendSystemMessage(message) {
+            if (dfMessenger) {
+                try {
+                    if (typeof dfMessenger.renderCustomText === 'function') {
+                        dfMessenger.renderCustomText(message, false); // false = mensaje del bot
+                    }
+                } catch (error) {
+                    console.log('Info del sistema:', message);
+                }
+            }
+        }
+
+        // MOSTRAR PREVIEW DE IMAGEN
+        function showImagePreview(file) {
+            const preview = document.getElementById('imagePreview');
+            const img = document.getElementById('previewImg');
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                img.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // CERRAR PREVIEW
+        function closePreview() {
+            document.getElementById('imagePreview').style.display = 'none';
+        }
+
+        // MOSTRAR NOTIFICACIÓN
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+
+        // CONFIGURAR MICRÓFONO (código existente)
+        function setupMicrophone() {
+            const micButton = document.getElementById('micButton');
+            const micText = document.getElementById('micText');
+            
+            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                micButton.addEventListener('click', async function() {
+                    if (!isRecording) {
+                        try {
+                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            mediaRecorder = new MediaRecorder(stream);
+                            audioChunks = [];
+                            
+                            mediaRecorder.ondataavailable = function(event) {
+                                audioChunks.push(event.data);
+                            };
+                            
+                            mediaRecorder.onstop = async function() {
+                                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
+                                await processAudio(audioBlob);
+                                stream.getTracks().forEach(track => track.stop());
+                            };
+                            
+                            mediaRecorder.start();
+                            isRecording = true;
+                            micButton.classList.add('recording');
+                            
+                            startTime = Date.now();
+                            timerInterval = setInterval(updateTimer, 100);
+                            
+                        } catch (error) {
+                            console.error('❌ Error accediendo al micrófono:', error);
+                            showNotification('❌ Error: No se puede acceder al micrófono', 'error');
+                        }
+                    } else {
+                        mediaRecorder.stop();
+                        isRecording = false;
+                        micButton.classList.remove('recording');
+                        micText.textContent = 'Record';
+                        clearInterval(timerInterval);
+                    }
+                });
+            } else {
+                micButton.style.display = 'none';
+            }
+        }
+
+        function updateTimer() {
+            const elapsed = Date.now() - startTime;
+            const seconds = Math.floor(elapsed / 1000);
+            const milliseconds = Math.floor((elapsed % 1000) / 100);
+            const micText = document.getElementById('micText');
+            micText.innerHTML = `<span class="timer">${String(seconds).padStart(2, '0')}:${milliseconds}</span>`;
+        }
+
+        async function processAudio(audioBlob) {
+            console.log('🔊 Procesando audio...');
+            showNotification('🎤 Procesando audio...', 'info');
+            // Aquí puedes implementar el procesamiento de audio si lo necesitas
+        }
+
+        // DETECTAR ERRORES DE CARGA
+        window.addEventListener('load', function() {
+            setTimeout(() => {
+                const dfMessenger = document.querySelector('df-messenger');
+                const corsError = document.getElementById('corsError');
+                
+                if (!dfMessenger || !dfMessenger.shadowRoot) {
+                    corsError.style.display = 'block';
+                    console.error('CORS Error: Configura tu dominio en Google Dialogflow');
+                }
+            }, 5000);
+        });
+
+        // EVENTOS DE DIALOGFLOW
+        document.addEventListener('df-messenger-loaded', function() {
+            console.log('✅ Dialogflow Messenger cargado correctamente');
+            console.log('📷 OCR integrado y listo');
+        });
+
+        console.log('🔧 Script OCR cargado correctamente');
+    </script>
+</body>
+</html>

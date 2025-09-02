@@ -1,0 +1,498 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Agents Directory</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://www.gstatic.com/dialogflow-console/fast/df-messenger/prod/v1/themes/df-messenger-default.css">
+    <style>
+        body {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+        }
+        
+        .container {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+        
+        .search-container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        
+        .search-input {
+            border: none;
+            border-radius: 50px;
+            padding: 15px 25px;
+            font-size: 1.1rem;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+            background: white;
+        }
+        
+        .search-input:focus {
+            outline: none;
+            box-shadow: 0 10px 30px rgba(102, 126, 234, 0.3);
+        }
+        
+        .agents-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 1.5rem;
+        }
+        
+        .agent-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 20px;
+            padding: 2rem;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            transition: all 0.3s ease;
+            opacity: 1;
+            transform: translateY(0);
+        }
+        
+        .agent-card:hover {
+            transform: translateY(-10px);
+            box-shadow: 0 30px 60px rgba(0, 0, 0, 0.2);
+        }
+        
+        .agent-card.hidden {
+            display: none !important;
+            opacity: 0;
+            transform: scale(0.8);
+            pointer-events: none;
+        }
+        
+        .bot-icon {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 1rem;
+            animation: float 3s ease-in-out infinite;
+            filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.2));
+        }
+        
+        @keyframes float {
+            0%, 100% { transform: translateY(0px) rotate(0deg); }
+            25% { transform: translateY(-5px) rotate(1deg); }
+            50% { transform: translateY(-8px) rotate(0deg); }
+            75% { transform: translateY(-3px) rotate(-1deg); }
+        }
+        
+        .agent-name {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 1rem;
+            line-height: 1.4;
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+        }
+        
+        .agent-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-bottom: 1.5rem;
+            justify-content: center;
+        }
+        
+        .tag {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 15px;
+            font-size: 0.75rem;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+        }
+        
+        .tag.operations { background: linear-gradient(45deg, #3498db, #2980b9); }
+        .tag.recruitment { background: linear-gradient(45deg, #e74c3c, #c0392b); }
+        .tag.development { background: linear-gradient(45deg, #2ecc71, #27ae60); }
+        .tag.sales { background: linear-gradient(45deg, #f39c12, #e67e22); }
+        .tag.marketing { background: linear-gradient(45deg, #9b59b6, #8e44ad); }
+        .tag.management { background: linear-gradient(45deg, #34495e, #2c3e50); }
+        .tag.human-resources { background: linear-gradient(45deg, #1abc9c, #16a085); }
+        
+        .filter-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+            margin-top: 1rem;
+            justify-content: center;
+        }
+        
+        .filter-tag {
+            background: rgba(255, 255, 255, 0.8);
+            color: #667eea;
+            padding: 0.5rem 1rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+            backdrop-filter: blur(10px);
+        }
+        
+        .filter-tag:hover {
+            background: rgba(255, 255, 255, 1);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+        
+        .filter-tag.active {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border-color: white;
+        }
+        
+        .filter-tag.all {
+            background: rgba(255, 255, 255, 0.9);
+            color: #333;
+        }
+        
+        .filter-tag.all.active {
+            background: white;
+            color: #667eea;
+        }
+        
+        .go-button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            border: none;
+            color: white;
+            padding: 12px 30px;
+            border-radius: 50px;
+            font-weight: 600;
+            font-size: 1rem;
+            transition: all 0.3s ease;
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .go-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 15px 30px rgba(102, 126, 234, 0.4);
+            color: white;
+            text-decoration: none;
+        }
+        
+        .title {
+            text-align: center;
+            color: white;
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-bottom: 3rem;
+            text-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+        }
+        
+        .no-results {
+            text-align: center;
+            color: white;
+            font-size: 1.2rem;
+            margin-top: 3rem;
+            display: none;
+        }
+        
+        .search-icon {
+            position: absolute;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #667eea;
+            font-size: 1.2rem;
+        }
+        
+        .search-wrapper {
+            position: relative;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1 class="title">
+            <i class="fas fa-robot"></i>
+            AI Agents Directory
+        </h1>
+        
+        <div class="search-container">
+            <div class="search-wrapper">
+                <input 
+                    type="text" 
+                    id="searchInput" 
+                    class="form-control search-input" 
+                    placeholder="Search agents by name..."
+                >
+                <i class="fas fa-search search-icon"></i>
+            </div>
+            
+            <div class="filter-tags">
+                <div class="filter-tag all active" data-tag="all">
+                    All Departments
+                </div>
+                <div class="filter-tag" data-tag="operations">
+                    Operations
+                </div>
+                <div class="filter-tag" data-tag="recruitment">
+                    Recruitment
+                </div>
+                <div class="filter-tag" data-tag="development">
+                    Development
+                </div>
+                <div class="filter-tag" data-tag="sales">
+                    Sales
+                </div>
+                <div class="filter-tag" data-tag="marketing">
+                    Marketing
+                </div>
+                <div class="filter-tag" data-tag="human-resources">
+                    Human Resources
+                </div>
+                <div class="filter-tag" data-tag="management">
+                    Management
+                </div>
+            </div>
+        </div>
+        
+        <div id="agentsContainer" class="agents-grid">
+            <!-- Los agentes se generarán aquí -->
+        </div>
+        
+        <div id="noResults" class="no-results">
+            <i class="fas fa-search-minus" style="font-size: 2rem; margin-bottom: 1rem;"></i>
+            <div>No agents found matching your search criteria</div>
+        </div>
+    </div>
+
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/bootstrap/5.3.0/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Agent data with department tags (UPDATED NAMES)
+        const agents = [
+            {
+                name: "Problem Solving Agent",
+                url: "https://n8n.fastxo.org/webhook/d3f2b643-292a-44d1-93c1-535d78860738/chat",
+                tags: ["operations", "human-resources"]
+            },
+            {
+                name: "Applicant's Profile and Interview Questionaire",
+                url: "https://n8n.fastxo.org/webhook/63c896f2-fc37-4d13-8f90-3eaca2096b18/chat",
+                tags: ["recruitment", "human-resources"]
+            },
+            {
+                name: "New Hire Personality Assessment Bot",
+                url: "https://n8n.fastxo.org/webhook/recruitment-chat-bot/chat",
+                tags: ["recruitment", "human-resources"]
+            },
+            {
+                name: "N8N Development Bot",
+                url: "https://n8n.fastxo.org/webhook/b416ffe7-7675-4c3c-b66d-298ff511516a/chat",
+                tags: ["development"]
+            },
+            {
+                name: "[F][INT][ChatBot][Its Vivace -> CustomerQuestions][V1][S2]",
+                url: "https://n8n.fastxo.org/webhook/0a017ef7-7273-4815-b5a5-50d91a97851e/chat",
+                tags: ["sales", "marketing"]
+            },
+            {
+                name: "Decision Maker Agent",
+                url: "chat_decision_making.html",
+                isNewPage: true,
+                tags: ["operations", "management"]
+            }
+        ];
+
+        // Function to create an agent card
+        function createAgentCard(agent, index) {
+            // NO target="_blank" for Decision Maker Agent - opens in same tab
+            const buttonAction = agent.isNewPage 
+                ? `href="${agent.url}"` 
+                : `href="${agent.url}" target="_blank"`;
+            
+            // Display tags with proper capitalization for UI
+            const tagsHtml = agent.tags.map(tag => {
+                const displayTag = tag.replace('-', ' ').split(' ').map(word => 
+                    word.charAt(0).toUpperCase() + word.slice(1)
+                ).join(' ');
+                return `<span class="tag ${tag}">${displayTag}</span>`;
+            }).join('');
+            
+            return `
+                <div class="agent-card" data-name="${agent.name.toLowerCase()}" data-tags="${agent.tags.join(',')}">
+                    <div class="text-center">
+                        <svg class="bot-icon" viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+                            <!-- Robot head -->
+                            <rect x="30" y="25" width="60" height="50" rx="15" fill="#2c3e50" stroke="#34495e" stroke-width="2"/>
+                            
+                            <!-- Antennas -->
+                            <line x1="40" y1="25" x2="35" y2="10" stroke="#34495e" stroke-width="3" stroke-linecap="round"/>
+                            <line x1="80" y1="25" x2="85" y2="10" stroke="#34495e" stroke-width="3" stroke-linecap="round"/>
+                            <circle cx="35" cy="10" r="3" fill="#3498db"/>
+                            <circle cx="85" cy="10" r="3" fill="#e74c3c"/>
+                            
+                            <!-- Eyes -->
+                            <circle cx="45" cy="45" r="8" fill="#ecf0f1"/>
+                            <circle cx="75" cy="45" r="8" fill="#ecf0f1"/>
+                            <circle cx="45" cy="45" r="4" fill="#2c3e50"/>
+                            <circle cx="75" cy="45" r="4" fill="#2c3e50"/>
+                            <circle cx="46" cy="43" r="1.5" fill="#ecf0f1"/>
+                            <circle cx="76" cy="43" r="1.5" fill="#ecf0f1"/>
+                            
+                            <!-- Mouth/Panel -->
+                            <rect x="50" y="60" width="20" height="8" rx="4" fill="#34495e"/>
+                            <line x1="52" y1="64" x2="68" y2="64" stroke="#3498db" stroke-width="1"/>
+                            
+                            <!-- Body -->
+                            <rect x="35" y="75" width="50" height="35" rx="8" fill="#34495e" stroke="#2c3e50" stroke-width="2"/>
+                            
+                            <!-- Chest panel -->
+                            <circle cx="60" cy="88" r="3" fill="#ecf0f1"/>
+                            <line x1="50" y1="95" x2="70" y2="95" stroke="#3498db" stroke-width="2"/>
+                            <line x1="50" y1="100" x2="60" y2="100" stroke="#3498db" stroke-width="2"/>
+                            <line x1="65" y1="100" x2="70" y2="100" stroke="#3498db" stroke-width="2"/>
+                            
+                            <!-- Arms -->
+                            <rect x="20" y="80" width="12" height="25" rx="6" fill="#34495e"/>
+                            <rect x="88" y="80" width="12" height="25" rx="6" fill="#34495e"/>
+                            
+                            <!-- Light details -->
+                            <circle cx="40" cy="35" r="1" fill="#3498db" opacity="0.7"/>
+                            <circle cx="80" cy="35" r="1" fill="#e74c3c" opacity="0.7"/>
+                        </svg>
+                        <div class="agent-name">${agent.name}</div>
+                        <div class="agent-tags">
+                            ${tagsHtml}
+                        </div>
+                        <a ${buttonAction} class="go-button">
+                            ${agent.isNewPage ? 'Open Chat' : 'Go to Chat'}
+                            <i class="fas fa-arrow-right"></i>
+                        </a>
+                    </div>
+                </div>
+            `;
+        }
+
+        // Function to render all agents
+        function renderAgents() {
+            const container = document.getElementById('agentsContainer');
+            container.innerHTML = agents.map((agent, index) => createAgentCard(agent, index)).join('');
+        }
+
+        // Function to search agents (FIXED - improved matching)
+        function searchAgents() {
+            const searchTerm = document.getElementById('searchInput').value.toLowerCase();
+            const activeFilter = document.querySelector('.filter-tag.active').getAttribute('data-tag');
+            const agentCards = document.querySelectorAll('.agent-card');
+            let visibleCount = 0;
+
+            agentCards.forEach(card => {
+                const agentName = card.getAttribute('data-name');
+                const agentTags = card.getAttribute('data-tags').split(',');
+                
+                // Check if matches search term
+                const matchesSearch = searchTerm === '' || agentName.includes(searchTerm);
+                
+                // Check if matches active filter
+                const matchesFilter = activeFilter === 'all' || agentTags.includes(activeFilter);
+                
+                // Show only if matches both search and filter
+                if (matchesSearch && matchesFilter) {
+                    card.classList.remove('hidden');
+                    card.style.display = 'block';
+                    visibleCount++;
+                } else {
+                    card.classList.add('hidden');
+                    card.style.display = 'none';
+                }
+            });
+
+            // Show/hide "no results" message
+            const noResults = document.getElementById('noResults');
+            if (visibleCount === 0) {
+                noResults.style.display = 'block';
+            } else {
+                noResults.style.display = 'none';
+            }
+        }
+
+        // Function to filter by tag (FIXED)
+        function filterByTag(selectedTag) {
+            const filterTags = document.querySelectorAll('.filter-tag');
+            
+            // Update active filter tag
+            filterTags.forEach(tag => {
+                tag.classList.remove('active');
+                if (tag.getAttribute('data-tag') === selectedTag) {
+                    tag.classList.add('active');
+                }
+            });
+
+            // Re-run search with new filter
+            searchAgents();
+        }
+
+        // Initialize the page
+        document.addEventListener('DOMContentLoaded', function() {
+            renderAgents();
+
+            // Set up real-time search that works with filters
+            const searchInput = document.getElementById('searchInput');
+            searchInput.addEventListener('input', searchAgents);
+
+            // Search on Enter key press
+            searchInput.addEventListener('keypress', function(e) {
+                if (e.key === 'Enter') {
+                    searchAgents();
+                }
+            });
+
+            // Add click events to filter tags
+            document.querySelectorAll('.filter-tag').forEach(tag => {
+                tag.addEventListener('click', function() {
+                    const selectedTag = this.getAttribute('data-tag');
+                    filterByTag(selectedTag);
+                });
+            });
+
+            // Initial animation effect
+            setTimeout(() => {
+                const cards = document.querySelectorAll('.agent-card');
+                cards.forEach((card, index) => {
+                    card.style.animation = `slideInUp 0.6s ease ${index * 0.1}s both`;
+                });
+            }, 100);
+        });
+
+        // Animación CSS adicional
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideInUp {
+                from {
+                    opacity: 0;
+                    transform: translateY(50px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    </script>
+</body>
+</html>
