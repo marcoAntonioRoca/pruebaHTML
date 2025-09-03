@@ -329,6 +329,7 @@
     <script>
         // CONFIGURACIÓN
         const OCR_WEBHOOK_URL = 'https://n8n.fastxo.org/webhook/extract-text';
+        const SPEECH_TO_TEXT_URL = 'https://n8n.fastxo.org/webhook/speech-to-text'; // Añadir tu webhook para audio
         
         // VARIABLES GLOBALES
         let dfMessenger;
@@ -350,7 +351,7 @@
                     
                     // Agregar mensaje de bienvenida con instrucciones de OCR
                     setTimeout(() => {
-                        sendSystemMessage('¡Hola! Puedes escribir mensajes normalmente o subir imágenes usando el botón 📷 para extraer texto automáticamente.');
+                        sendSystemMessage('¡Hola! Puedes escribir mensajes normalmente, subir imágenes usando el botón 📷 o grabar audio con el botón 🎤 para interactuar conmigo.');
                     }, 1000);
                 }
             }, 2000);
@@ -358,6 +359,93 @@
             // Configurar micrófono
             setupMicrophone();
         });
+
+        // ==================== FUNCIONES PRINCIPALES ====================
+
+        // FUNCIÓN MEJORADA PARA ENVIAR COMO INPUT DEL USUARIO
+        function sendUserMessage(message) {
+            if (dfMessenger && dfMessenger.shadowRoot) {
+                try {
+                    // Método 1: Buscar el input field y simular escritura + envío
+                    const chatInput = dfMessenger.shadowRoot.querySelector('df-messenger-chat-bubble input[type="text"], df-messenger-chat-bubble textarea, input[aria-label*="Message"], textarea[aria-label*="Message"], input[placeholder*="message"], textarea[placeholder*="message"]');
+                    
+                    if (chatInput) {
+                        // Simular que el usuario escribió el mensaje
+                        chatInput.value = message;
+                        chatInput.focus();
+                        
+                        // Disparar eventos de input
+                        chatInput.dispatchEvent(new Event('input', { bubbles: true }));
+                        chatInput.dispatchEvent(new Event('change', { bubbles: true }));
+                        
+                        // Buscar y hacer clic en el botón de enviar
+                        const sendButton = dfMessenger.shadowRoot.querySelector('button[aria-label*="Send"], button[title*="Send"], button[type="submit"], .send-button, [role="button"]:has(svg)');
+                        
+                        if (sendButton) {
+                            setTimeout(() => {
+                                sendButton.click();
+                                console.log('✅ Mensaje enviado como INPUT del usuario:', message.substring(0, 100) + '...');
+                            }, 100);
+                        } else {
+                            // Fallback: Disparar evento Enter
+                            const enterEvent = new KeyboardEvent('keydown', {
+                                key: 'Enter',
+                                code: 'Enter',
+                                keyCode: 13,
+                                which: 13,
+                                bubbles: true
+                            });
+                            chatInput.dispatchEvent(enterEvent);
+                            console.log('✅ Mensaje enviado via Enter:', message.substring(0, 100) + '...');
+                        }
+                    } else {
+                        // Método 2: Usar API directa si está disponible
+                        console.warn('⚠️ Input field no encontrado, usando método alternativo...');
+                        fallbackSendMessage(message);
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Error enviando mensaje del usuario:', error);
+                    fallbackSendMessage(message);
+                }
+            } else {
+                console.error('❌ Dialogflow Messenger no disponible');
+                fallbackSendMessage(message);
+            }
+        }
+
+        // MÉTODO ALTERNATIVO PARA ENVIAR MENSAJES
+        function fallbackSendMessage(message) {
+            try {
+                if (dfMessenger) {
+                    // Intentar con diferentes APIs de Dialogflow
+                    if (typeof dfMessenger.sendQuery === 'function') {
+                        dfMessenger.sendQuery(message);
+                    } else if (typeof dfMessenger.renderCustomText === 'function') {
+                        dfMessenger.renderCustomText(message, true); // true = mensaje del usuario
+                    } else {
+                        // Crear evento personalizado
+                        const event = new CustomEvent('df-request-sent', {
+                            detail: { 
+                                requestBody: { 
+                                    queryInput: { 
+                                        text: { text: message, languageCode: 'en' } 
+                                    } 
+                                } 
+                            }
+                        });
+                        dfMessenger.dispatchEvent(event);
+                    }
+                    console.log('✅ Mensaje enviado via fallback:', message.substring(0, 100) + '...');
+                }
+            } catch (error) {
+                console.error('❌ Error en fallback:', error);
+                // Último recurso: mostrar alerta
+                alert('Texto procesado: ' + message);
+            }
+        }
+
+        // ==================== OCR FUNCTIONALITY ====================
 
         // FUNCIÓN PRINCIPAL DE OCR
         async function handleImageUpload(event) {
@@ -395,12 +483,12 @@
                     // Mostrar texto extraído en notificación
                     showNotification('✅ Texto extraído correctamente!', 'success');
                     
-                    // Preparar mensaje con texto extraído
-                    const message = `Imagen procesada: "${file.name}"\n\nTexto extraído:\n${result.extractedText}`;
+                    // CORREGIDO: Preparar mensaje como INPUT del usuario
+                    const userMessage = `Analiza este texto extraído de una imagen (${file.name}): ${result.extractedText}`;
                     
-                    // Enviar el texto extraído como mensaje al chat
+                    // Enviar como INPUT del usuario al agente conversacional
                     setTimeout(() => {
-                        sendMessageToChat(message);
+                        sendUserMessage(userMessage);
                         closePreview();
                     }, 1500);
                     
@@ -422,78 +510,9 @@
             }
         }
 
-        // ENVIAR MENSAJE AL CHAT DE DIALOGFLOW
-        function sendMessageToChat(message) {
-            if (dfMessenger) {
-                try {
-                    // Método 1: Usar renderCustomText si está disponible
-                    if (typeof dfMessenger.renderCustomText === 'function') {
-                        dfMessenger.renderCustomText(message, true);
-                    }
-                    // Método 2: Disparar evento personalizado
-                    else {
-                        const event = new CustomEvent('df-request-sent', {
-                            detail: { requestBody: { queryInput: { text: { text: message } } } }
-                        });
-                        dfMessenger.dispatchEvent(event);
-                    }
-                    
-                    console.log('💬 Mensaje enviado al chat:', message.substring(0, 100) + '...');
-                } catch (error) {
-                    console.error('Error enviando mensaje al chat:', error);
-                    // Fallback: mostrar en consola
-                    alert('Texto extraído: ' + message);
-                }
-            } else {
-                console.error('❌ Dialogflow Messenger no disponible');
-                alert('Texto extraído: ' + message);
-            }
-        }
+        // ==================== AUDIO FUNCTIONALITY ====================
 
-        // ENVIAR MENSAJE DEL SISTEMA
-        function sendSystemMessage(message) {
-            if (dfMessenger) {
-                try {
-                    if (typeof dfMessenger.renderCustomText === 'function') {
-                        dfMessenger.renderCustomText(message, false); // false = mensaje del bot
-                    }
-                } catch (error) {
-                    console.log('Info del sistema:', message);
-                }
-            }
-        }
-
-        // MOSTRAR PREVIEW DE IMAGEN
-        function showImagePreview(file) {
-            const preview = document.getElementById('imagePreview');
-            const img = document.getElementById('previewImg');
-            
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                img.src = e.target.result;
-                preview.style.display = 'block';
-            };
-            reader.readAsDataURL(file);
-        }
-
-        // CERRAR PREVIEW
-        function closePreview() {
-            document.getElementById('imagePreview').style.display = 'none';
-        }
-
-        // MOSTRAR NOTIFICACIÓN
-        function showNotification(message, type = 'info') {
-            const notification = document.getElementById('notification');
-            notification.textContent = message;
-            notification.className = `notification ${type}`;
-            notification.style.display = 'block';
-            
-            setTimeout(() => {
-                notification.style.display = 'none';
-            }, 3000);
-        }
-
-        // CONFIGURAR MICRÓFONO (código existente)
+        // CONFIGURAR MICRÓFONO
         function setupMicrophone() {
             const micButton = document.getElementById('micButton');
             const micText = document.getElementById('micText');
@@ -548,11 +567,92 @@
             micText.innerHTML = `<span class="timer">${String(seconds).padStart(2, '0')}:${milliseconds}</span>`;
         }
 
+        // PROCESAR AUDIO Y ENVIARLO COMO INPUT DEL USUARIO
         async function processAudio(audioBlob) {
             console.log('🔊 Procesando audio...');
-            showNotification('🎤 Procesando audio...', 'info');
-            // Aquí puedes implementar el procesamiento de audio si lo necesitas
+            showNotification('🎤 Convirtiendo audio a texto...', 'info');
+            
+            try {
+                // Preparar FormData para el webhook de speech-to-text
+                const formData = new FormData();
+                formData.append('audio', audioBlob, 'recording.wav');
+
+                // Enviar a tu webhook n8n para speech-to-text
+                const response = await fetch(SPEECH_TO_TEXT_URL, {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const result = await response.json();
+                console.log('🎙️ Respuesta del webhook Speech-to-Text:', result);
+
+                if (result.success && result.transcription) {
+                    showNotification('✅ Audio convertido correctamente!', 'success');
+                    
+                    // CORREGIDO: Enviar la transcripción como INPUT del usuario
+                    const userMessage = result.transcription;
+                    
+                    setTimeout(() => {
+                        sendUserMessage(userMessage);
+                    }, 1500);
+                    
+                } else {
+                    showNotification('❌ No se pudo convertir el audio a texto', 'error');
+                    console.error('Error en Speech-to-Text:', result);
+                }
+
+            } catch (error) {
+                showNotification('❌ Error procesando audio: ' + error.message, 'error');
+                console.error('Error en processAudio:', error);
+            }
         }
+
+        // ==================== UTILITY FUNCTIONS ====================
+
+        // ENVIAR MENSAJE DEL SISTEMA (respuestas del bot)
+        function sendSystemMessage(message) {
+            if (dfMessenger) {
+                try {
+                    if (typeof dfMessenger.renderCustomText === 'function') {
+                        dfMessenger.renderCustomText(message, false); // false = mensaje del bot
+                    }
+                } catch (error) {
+                    console.log('Info del sistema:', message);
+                }
+            }
+        }
+
+        // MOSTRAR PREVIEW DE IMAGEN
+        function showImagePreview(file) {
+            const preview = document.getElementById('imagePreview');
+            const img = document.getElementById('previewImg');
+            
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                img.src = e.target.result;
+                preview.style.display = 'block';
+            };
+            reader.readAsDataURL(file);
+        }
+
+        // CERRAR PREVIEW
+        function closePreview() {
+            document.getElementById('imagePreview').style.display = 'none';
+        }
+
+        // MOSTRAR NOTIFICACIÓN
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 3000);
+        }
+
+        // ==================== EVENT LISTENERS ====================
 
         // DETECTAR ERRORES DE CARGA
         window.addEventListener('load', function() {
@@ -571,9 +671,10 @@
         document.addEventListener('df-messenger-loaded', function() {
             console.log('✅ Dialogflow Messenger cargado correctamente');
             console.log('📷 OCR integrado y listo');
+            console.log('🎤 Speech-to-Text integrado y listo');
         });
 
-        console.log('🔧 Script OCR cargado correctamente');
+        console.log('🔧 Script OCR y Speech-to-Text cargado correctamente');
     </script>
 </body>
 </html>
