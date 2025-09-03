@@ -683,8 +683,7 @@
                         const recognizedText = State.finalTranscript.trim();
                         Utils.log('✅ Texto final reconocido:', recognizedText);
                         
-                        // PASO CRÍTICO: Insertar el texto reconocido en el campo de input
-                        // El usuario deberá presionar Enter manualmente para enviar
+                        // SOLO COLOCAR EL TEXTO EN EL INPUT - NO ENVIAR AUTOMÁTICAMENTE
                         setTimeout(async () => {
                             const success = await InputManager.insertTextInInput(recognizedText);
                             
@@ -693,7 +692,7 @@
                             micText.textContent = 'Speak';
 
                             if (success) {
-                                Utils.showNotification('✅ Audio convertido a texto! Presiona Enter para enviar', 'success');
+                                Utils.showNotification('✅ Audio convertido a texto! TÚ decides cuándo enviarlo', 'success');
                             }
                         }, 500);
                     } else {
