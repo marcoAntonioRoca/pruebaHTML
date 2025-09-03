@@ -683,16 +683,18 @@
                         const recognizedText = State.finalTranscript.trim();
                         Utils.log('✅ Texto final reconocido:', recognizedText);
                         
-                        // SOLO COLOCAR EL TEXTO EN EL INPUT - NO ENVIAR AUTOMÁTICAMENTE
+                        // ENVIAR DIRECTAMENTE USANDO LA API DE DIALOGFLOW
                         setTimeout(async () => {
-                            const success = await InputManager.insertTextInInput(recognizedText);
+                            const success = await DialogflowAPI.sendTextMessage(recognizedText);
                             
                             transcriptDiv.style.display = 'none';
                             micButton.classList.remove('processing');
                             micText.textContent = 'Speak';
 
                             if (success) {
-                                Utils.showNotification('✅ Audio convertido a texto! TÚ decides cuándo enviarlo', 'success');
+                                Utils.showNotification('✅ Audio enviado al agente!', 'success');
+                            } else {
+                                Utils.showNotification('❌ Error enviando audio al agente', 'error');
                             }
                         }, 500);
                     } else {
