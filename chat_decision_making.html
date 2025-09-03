@@ -587,14 +587,11 @@
                 console.log('📄 Respuesta del webhook OCR:', result);
 
                 if (result.success && result.extractedText) {
-                    // Preparar mensaje para enviar como usuario
-                    const userMessage = `Analiza este texto extraído de la imagen "${file.name}": ${result.extractedText}`;
-                    
                     showNotification('✅ Texto extraído! Enviando...', 'success');
                     
-                    // Enviar como mensaje del usuario
+                    // Enviar SOLO el texto extraído como si el usuario lo hubiera escrito
                     setTimeout(() => {
-                        sendMessageAsUser(userMessage);
+                        sendMessageAsUser(result.extractedText);
                         closePreview();
                     }, 1000);
                     
