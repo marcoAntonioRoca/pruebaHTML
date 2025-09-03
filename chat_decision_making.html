@@ -172,6 +172,11 @@
             animation: none !important;
         }
 
+        .mic-button.listening {
+            background: #ff9800 !important;
+            animation: listening-pulse 2s infinite !important;
+        }
+
         .mic-icon {
             width: 16px !important;
             height: 16px !important;
@@ -181,6 +186,12 @@
         .timer {
             font-family: monospace !important;
             font-size: 13px !important;
+        }
+
+        @keyframes listening-pulse {
+            0% { background: #ff9800; }
+            50% { background: #ff7043; }
+            100% { background: #ff9800; }
         }
 
         /* INPUT FILE OCULTO */
@@ -329,15 +340,11 @@
     <script>
         // CONFIGURACIÓN
         const OCR_WEBHOOK_URL = 'https://n8n.fastxo.org/webhook/extract-text';
-        const SPEECH_TO_TEXT_URL = 'https://n8n.fastxo.org/webhook/speech-to-text'; // Añadir tu webhook para audio
         
         // VARIABLES GLOBALES
         let dfMessenger;
-        let mediaRecorder;
-        let audioChunks = [];
-        let isRecording = false;
-        let startTime;
-        let timerInterval;
+        let speechRecognition;
+        let isListening = false;
 
         // INICIALIZACIÓN
         document.addEventListener('DOMContentLoaded', function() {
@@ -351,13 +358,13 @@
                     
                     // Agregar mensaje de bienvenida con instrucciones de OCR
                     setTimeout(() => {
-                        sendSystemMessage('Hello, send any character to start the conversation with the Agent!');
+                        sendSystemMessage('¡Hola! Puedes escribir mensajes normalmente, subir imágenes usando el botón 📷 o grabar audio con el botón 🎤 para interactuar conmigo.');
                     }, 1000);
                 }
             }, 2000);
             
-            // Configurar micrófono
-            setupMicrophone();
+            // Configurar reconocimiento de voz nativo
+            setupSpeechRecognition();
         });
 
         // ==================== FUNCIONES PRINCIPALES ====================
@@ -510,101 +517,117 @@
             }
         }
 
-        // ==================== AUDIO FUNCTIONALITY ====================
+        // ==================== SPEECH RECOGNITION FUNCTIONALITY ====================
 
-        // CONFIGURAR MICRÓFONO
-        function setupMicrophone() {
+        // CONFIGURAR RECONOCIMIENTO DE VOZ NATIVO (WEB SPEECH API)
+        function setupSpeechRecognition() {
+            // Verificar soporte del navegador
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            
+            if (!SpeechRecognition) {
+                console.warn('⚠️ Speech Recognition no soportado en este navegador');
+                document.getElementById('micButton').style.display = 'none';
+                return;
+            }
+
+            // Inicializar Speech Recognition
+            speechRecognition = new SpeechRecognition();
+            speechRecognition.continuous = false; // Solo una frase
+            speechRecognition.interimResults = true; // Resultados en tiempo real
+            speechRecognition.lang = 'es-ES'; // Idioma (puedes cambiarlo)
+
+            const micButton = document.getElementById('micButton');
+            const micText = document.getElementById('micText');
+
+            // EVENTOS DEL RECONOCIMIENTO DE VOZ
+            speechRecognition.onstart = function() {
+                console.log('🎤 Reconocimiento de voz iniciado');
+                isListening = true;
+                micButton.classList.add('listening');
+                micText.textContent = 'Escuchando...';
+                showNotification('🎤 Habla ahora...', 'info');
+            };
+
+            speechRecognition.onresult = function(event) {
+                let transcript = '';
+                let isFinal = false;
+
+                // Procesar todos los resultados
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    transcript += event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        isFinal = true;
+                    }
+                }
+
+                console.log('🗣️ Transcripción:', transcript);
+
+                // Si es resultado final, enviar al agente
+                if (isFinal && transcript.trim()) {
+                    showNotification('✅ Mensaje de voz procesado!', 'success');
+                    
+                    // Enviar directamente la transcripción al agente
+                    setTimeout(() => {
+                        sendUserMessage(transcript.trim());
+                    }, 1000);
+                }
+            };
+
+            speechRecognition.onerror = function(event) {
+                console.error('❌ Error en reconocimiento de voz:', event.error);
+                let errorMessage = 'Error en reconocimiento de voz';
+                
+                switch(event.error) {
+                    case 'no-speech':
+                        errorMessage = 'No se detectó voz';
+                        break;
+                    case 'audio-capture':
+                        errorMessage = 'Error accediendo al micrófono';
+                        break;
+                    case 'not-allowed':
+                        errorMessage = 'Permisos de micrófono denegados';
+                        break;
+                    case 'network':
+                        errorMessage = 'Error de conexión';
+                        break;
+                }
+                
+                showNotification('❌ ' + errorMessage, 'error');
+                resetMicButton();
+            };
+
+            speechRecognition.onend = function() {
+                console.log('🎤 Reconocimiento de voz finalizado');
+                resetMicButton();
+            };
+
+            // CLICK EN EL BOTÓN DE MICRÓFONO
+            micButton.addEventListener('click', function() {
+                if (!isListening) {
+                    // Iniciar reconocimiento
+                    try {
+                        speechRecognition.start();
+                    } catch (error) {
+                        console.error('❌ Error iniciando reconocimiento:', error);
+                        showNotification('❌ Error iniciando reconocimiento', 'error');
+                    }
+                } else {
+                    // Detener reconocimiento
+                    speechRecognition.stop();
+                }
+            });
+
+            console.log('✅ Speech Recognition configurado correctamente');
+        }
+
+        // RESETEAR BOTÓN DE MICRÓFONO
+        function resetMicButton() {
             const micButton = document.getElementById('micButton');
             const micText = document.getElementById('micText');
             
-            if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-                micButton.addEventListener('click', async function() {
-                    if (!isRecording) {
-                        try {
-                            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                            mediaRecorder = new MediaRecorder(stream);
-                            audioChunks = [];
-                            
-                            mediaRecorder.ondataavailable = function(event) {
-                                audioChunks.push(event.data);
-                            };
-                            
-                            mediaRecorder.onstop = async function() {
-                                const audioBlob = new Blob(audioChunks, { type: 'audio/wav' });
-                                await processAudio(audioBlob);
-                                stream.getTracks().forEach(track => track.stop());
-                            };
-                            
-                            mediaRecorder.start();
-                            isRecording = true;
-                            micButton.classList.add('recording');
-                            
-                            startTime = Date.now();
-                            timerInterval = setInterval(updateTimer, 100);
-                            
-                        } catch (error) {
-                            console.error('❌ Error accediendo al micrófono:', error);
-                            showNotification('❌ Error: No se puede acceder al micrófono', 'error');
-                        }
-                    } else {
-                        mediaRecorder.stop();
-                        isRecording = false;
-                        micButton.classList.remove('recording');
-                        micText.textContent = 'Record';
-                        clearInterval(timerInterval);
-                    }
-                });
-            } else {
-                micButton.style.display = 'none';
-            }
-        }
-
-        function updateTimer() {
-            const elapsed = Date.now() - startTime;
-            const seconds = Math.floor(elapsed / 1000);
-            const milliseconds = Math.floor((elapsed % 1000) / 100);
-            const micText = document.getElementById('micText');
-            micText.innerHTML = `<span class="timer">${String(seconds).padStart(2, '0')}:${milliseconds}</span>`;
-        }
-
-        // PROCESAR AUDIO Y ENVIARLO COMO INPUT DEL USUARIO
-        async function processAudio(audioBlob) {
-            console.log('🔊 Procesando audio...');
-            showNotification('🎤 Convirtiendo audio a texto...', 'info');
-            
-            try {
-                // Preparar FormData para el webhook de speech-to-text
-                const formData = new FormData();
-                formData.append('audio', audioBlob, 'recording.wav');
-
-                // Enviar a tu webhook n8n para speech-to-text
-                const response = await fetch(SPEECH_TO_TEXT_URL, {
-                    method: 'POST',
-                    body: formData
-                });
-
-                const result = await response.json();
-                console.log('🎙️ Respuesta del webhook Speech-to-Text:', result);
-
-                if (result.success && result.transcription) {
-                    showNotification('✅ Audio convertido correctamente!', 'success');
-                    
-                    // CORREGIDO: Enviar la transcripción como INPUT del usuario
-                    const userMessage = result.transcription;
-                    
-                    setTimeout(() => {
-                        sendUserMessage(userMessage);
-                    }, 1500);
-                    
-                } else {
-                    showNotification('❌ No se pudo convertir el audio a texto', 'error');
-                    console.error('Error en Speech-to-Text:', result);
-                }
-
-            } catch (error) {
-                showNotification('❌ Error procesando audio: ' + error.message, 'error');
-                console.error('Error en processAudio:', error);
-            }
+            isListening = false;
+            micButton.classList.remove('listening');
+            micText.textContent = 'Record';
         }
 
         // ==================== UTILITY FUNCTIONS ====================
@@ -671,10 +694,10 @@
         document.addEventListener('df-messenger-loaded', function() {
             console.log('✅ Dialogflow Messenger cargado correctamente');
             console.log('📷 OCR integrado y listo');
-            console.log('🎤 Speech-to-Text integrado y listo');
+            console.log('🎤 Speech Recognition nativo integrado y listo');
         });
 
-        console.log('🔧 Script OCR y Speech-to-Text cargado correctamente');
+        console.log('🔧 Script OCR y Speech Recognition nativo cargado correctamente');
     </script>
 </body>
 </html>
