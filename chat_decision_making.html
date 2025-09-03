@@ -178,37 +178,6 @@
             display: none !important;
         }
 
-        .image-preview {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            max-width: 200px;
-            max-height: 150px;
-            border-radius: 10px;
-            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
-            z-index: 10000;
-            background: white;
-            padding: 5px;
-            display: none;
-        }
-
-        .preview-close {
-            position: absolute;
-            top: -10px;
-            right: -10px;
-            width: 25px;
-            height: 25px;
-            border-radius: 50%;
-            background: #ea4335;
-            color: white;
-            border: none;
-            cursor: pointer;
-            font-size: 16px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-
         .notification {
             position: absolute;
             top: 20px;
@@ -263,21 +232,6 @@
             margin: 0;
             font-style: italic;
         }
-
-        .cors-error {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            color: #e74c3c;
-            background: rgba(231, 76, 60, 0.1);
-            padding: 2rem;
-            border-radius: 15px;
-            border: 2px solid #e74c3c;
-            max-width: 80%;
-            display: none;
-        }
     </style>
 </head>
 <body>
@@ -293,21 +247,9 @@
             <!-- Notification -->
             <div class="notification" id="notification"></div>
 
-            <!-- Image Preview -->
-            <div class="image-preview" id="imagePreview">
-                <button class="preview-close" onclick="closePreview()">×</button>
-                <img id="previewImg" alt="Preview" style="width: 100%; height: 100%; object-fit: cover; border-radius: 5px;">
-            </div>
-
             <!-- Voice Transcript Preview -->
             <div class="voice-transcript" id="voiceTranscript">
                 <p class="transcript-text" id="transcriptText"></p>
-            </div>
-
-            <!-- CORS Error Message -->
-            <div class="cors-error" id="corsError">
-                <h3>🚫 Error CORS 403</h3>
-                <p><strong>Message:</strong> You do not have the permissions to use this agent</p>
             </div>
 
             <!-- Dialogflow Messenger -->
@@ -327,7 +269,7 @@
             </df-messenger>
 
             <!-- OCR Button -->
-            <button class="control-button ocr-button" id="ocrButton" onclick="document.getElementById('imageInput').click()" title="Enviar imagen al agente">
+            <button class="control-button ocr-button" id="ocrButton" onclick="document.getElementById('imageInput').click()" title="Extraer texto de imagen y enviarlo al agente">
                 📷
             </button>
             <input type="file" id="imageInput" class="file-input" accept="image/*" onchange="handleImageUpload(event)">
@@ -348,487 +290,218 @@
         // ==================== CONFIGURATION ====================
         const CONFIG = {
             OCR_WEBHOOK_URL: 'https://n8n.fastxo.org/webhook/extract-text',
-            SPEECH_LANG: 'en-US',
-            MAX_FIND_ATTEMPTS: 15,
-            RETRY_DELAY: 300,
-            NOTIFICATION_DURATION: 4000
+            SPEECH_LANG: 'en-US'
         };
 
-        // ==================== STATE MANAGEMENT ====================
-        const State = {
-            dfMessenger: null,
-            recognition: null,
-            isListening: false,
-            isProcessingOCR: false,
-            finalTranscript: ''
-        };
+        // ==================== STATE ====================
+        let dfMessenger = null;
+        let recognition = null;
+        let isListening = false;
+        let finalTranscript = '';
 
-        // ==================== UTILITY FUNCTIONS ====================
-        const Utils = {
-            showNotification(message, type = 'info') {
-                const notification = document.getElementById('notification');
-                notification.textContent = message;
-                notification.className = `notification ${type}`;
-                notification.style.display = 'block';
-                
-                setTimeout(() => {
-                    notification.style.display = 'none';
-                }, CONFIG.NOTIFICATION_DURATION);
-            },
+        // ==================== UTILS ====================
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification ${type}`;
+            notification.style.display = 'block';
+            
+            setTimeout(() => {
+                notification.style.display = 'none';
+            }, 4000);
+        }
 
-            showImagePreview(file) {
-                const preview = document.getElementById('imagePreview');
-                const img = document.getElementById('previewImg');
-                
-                const reader = new FileReader();
-                reader.onload = function(e) {
-                    img.src = e.target.result;
-                    preview.style.display = 'block';
-                };
-                reader.readAsDataURL(file);
-            },
-
-            closePreview() {
-                document.getElementById('imagePreview').style.display = 'none';
-            },
-
-            log(message, data = null) {
-                console.log(`🤖 ${message}`, data || '');
-            },
-
-            error(message, error = null) {
-                console.error(`❌ ${message}`, error || '');
-            },
-
-            formatText(text) {
-                // Limpiar y formatear el texto extraído
-                return text.trim()
-                    .replace(/\s+/g, ' ') // Reemplazar múltiples espacios por uno solo
-                    .replace(/\n\s*\n/g, '\n'); // Limpiar líneas vacías múltiples
+        // ==================== ENVIAR AL AGENTE ====================
+        function sendToAgent(message) {
+            console.log('📤 ENVIANDO AL AGENTE:', message);
+            
+            if (!dfMessenger) {
+                console.error('❌ df-messenger no disponible');
+                return;
             }
-        };
 
-        // ==================== INPUT FIELD MANAGER ====================
-        const InputManager = {
-            async findInputField() {
-                return new Promise((resolve, reject) => {
-                    let attempts = 0;
-                    
-                    const tryFind = () => {
-                        attempts++;
-                        Utils.log(`Buscando input field - Intento ${attempts}/${CONFIG.MAX_FIND_ATTEMPTS}`);
-                        
-                        if (!State.dfMessenger?.shadowRoot) {
-                            if (attempts < CONFIG.MAX_FIND_ATTEMPTS) {
-                                setTimeout(tryFind, CONFIG.RETRY_DELAY);
-                                return;
-                            }
-                            reject('No se pudo acceder al Shadow DOM');
-                            return;
-                        }
-
-                        // Selectors más específicos para Dialogflow Messenger
-                        const selectors = [
-                            'input[type="text"]',
-                            'textarea',
-                            'input[placeholder*="message"]',
-                            'textarea[placeholder*="message"]',
-                            'input[placeholder*="Type"]',
-                            'textarea[placeholder*="Type"]',
-                            '[contenteditable="true"]',
-                            '.df-messenger-user-input input',
-                            '.df-messenger-user-input textarea',
-                            'df-messenger-user-input input',
-                            'df-messenger-user-input textarea'
-                        ];
-
-                        for (const selector of selectors) {
-                            const elements = State.dfMessenger.shadowRoot.querySelectorAll(selector);
-                            for (const element of elements) {
-                                // Verificar que el elemento sea visible y editable
-                                if (element.offsetParent !== null && !element.disabled && !element.readOnly) {
-                                    Utils.log(`✅ Input encontrado con selector: ${selector}`);
-                                    resolve(element);
-                                    return;
-                                }
-                            }
-                        }
-
-                        if (attempts < CONFIG.MAX_FIND_ATTEMPTS) {
-                            setTimeout(tryFind, CONFIG.RETRY_DELAY);
-                        } else {
-                            reject('Input field no encontrado después de varios intentos');
-                        }
-                    };
-
-                    tryFind();
+            // Usar la API oficial de df-messenger para enviar mensaje
+            if (typeof dfMessenger.renderCustomText === 'function') {
+                dfMessenger.renderCustomText(message);
+                console.log('✅ Mensaje enviado usando renderCustomText');
+            } else {
+                console.log('⚠️ renderCustomText no disponible, intentando método alternativo');
+                
+                // Método alternativo: disparar evento personalizado
+                const event = new CustomEvent('df-user-message', {
+                    detail: { message: message }
                 });
-            },
-
-            async insertTextInInput(text) {
-                Utils.log('📝 Insertando texto en el campo de input:', text.substring(0, 100) + '...');
-                
-                try {
-                    const inputField = await this.findInputField();
-                    
-                    // Formatear el texto antes de insertarlo
-                    const formattedText = Utils.formatText(text);
-                    
-                    // Método 1: Limpiar y establecer valor
-                    inputField.value = '';
-                    inputField.focus();
-                    
-                    // Método 2: Usar document.execCommand si está disponible (mejor para mantener el cursor)
-                    if (document.execCommand) {
-                        inputField.select();
-                        document.execCommand('insertText', false, formattedText);
-                    } else {
-                        inputField.value = formattedText;
-                    }
-                    
-                    // Método 3: Disparar eventos para que Dialogflow detecte el cambio
-                    const events = ['input', 'change', 'keyup', 'keydown', 'focus'];
-                    events.forEach(eventType => {
-                        const event = new Event(eventType, { 
-                            bubbles: true, 
-                            cancelable: true 
-                        });
-                        inputField.dispatchEvent(event);
-                    });
-
-                    // Mantener el foco en el campo para que el usuario pueda editar o enviar
-                    inputField.focus();
-
-                    Utils.log('✅ Texto insertado exitosamente');
-                    Utils.showNotification('✅ Texto colocado en el campo! Puedes editarlo y presionar Enter para enviar', 'success');
-                    
-                    return true;
-                    
-                } catch (error) {
-                    Utils.error('Error insertando texto en el campo:', error);
-                    Utils.showNotification('❌ Error colocando texto en el campo de mensaje', 'error');
-                    return false;
-                }
+                dfMessenger.dispatchEvent(event);
             }
-        };
+        }
 
-        // ==================== OCR MANAGER ====================
-        const OCRManager = {
-            async processImage(file) {
-                if (State.isProcessingOCR) {
-                    Utils.showNotification('⏳ Ya hay una imagen siendo procesada...', 'info');
-                    return;
-                }
+        // ==================== OCR ====================
+        async function processOCR(file) {
+            const ocrButton = document.getElementById('ocrButton');
+            ocrButton.classList.add('processing');
+            ocrButton.innerHTML = '⏳';
+            
+            showNotification('📷 Extrayendo texto...', 'info');
 
-                State.isProcessingOCR = true;
-                Utils.log('📷 Procesando imagen para OCR:', file.name);
-                
-                const ocrButton = document.getElementById('ocrButton');
-                ocrButton.classList.add('processing');
-                ocrButton.innerHTML = '⏳';
-                
-                Utils.showNotification('📷 Extrayendo texto de la imagen...', 'info');
-                Utils.showImagePreview(file);
+            try {
+                const formData = new FormData();
+                formData.append('file', file);
 
-                try {
-                    // Validar el archivo
-                    if (file.size > 10 * 1024 * 1024) { // 10MB
-                        throw new Error('La imagen es demasiado grande. Máximo 10MB.');
-                    }
-
-                    const formData = new FormData();
-                    formData.append('file', file);
-
-                    Utils.log('📤 Enviando imagen al webhook N8N...');
-                    
-                    const response = await fetch(CONFIG.OCR_WEBHOOK_URL, {
-                        method: 'POST',
-                        body: formData,
-                        headers: {
-                            // No establecer Content-Type para FormData, el browser lo hará automáticamente
-                        }
-                    });
-
-                    Utils.log('📥 Respuesta del servidor:', response.status, response.statusText);
-
-                    if (!response.ok) {
-                        throw new Error(`Error del servidor: ${response.status} ${response.statusText}`);
-                    }
-
-                    const result = await response.json();
-                    Utils.log('📋 Respuesta del webhook OCR:', result);
-
-                    // Verificar la estructura de respuesta
-                    if (result && result.success && result.extractedText) {
-                        const extractedText = result.extractedText.trim();
-                        
-                        if (extractedText.length > 0) {
-                            Utils.log(`✅ Texto extraído exitosamente: ${extractedText.length} caracteres`);
-                            
-                            // PASO CRÍTICO: Insertar el texto extraído en el campo de input
-                            // El usuario deberá presionar Enter manualmente para enviar
-                            const success = await InputManager.insertTextInInput(extractedText);
-                            
-                            if (success) {
-                                Utils.showNotification('✅ Texto extraído y colocado! Presiona Enter para enviar', 'success');
-                            }
-                            
-                            // Cerrar la vista previa después de un momento
-                            setTimeout(() => {
-                                Utils.closePreview();
-                            }, 2000);
-                            
-                        } else {
-                            Utils.showNotification('⚠️ No se detectó texto en la imagen', 'error');
-                        }
-                        
-                    } else {
-                        const errorMsg = result?.error || result?.message || 'Respuesta inválida del servidor';
-                        throw new Error(`Error en OCR: ${errorMsg}`);
-                    }
-
-                } catch (error) {
-                    Utils.error('Error procesando imagen:', error);
-                    let errorMessage = '❌ Error procesando imagen: ';
-                    
-                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
-                        errorMessage += 'No se pudo conectar al servicio OCR';
-                    } else if (error.message.includes('CORS')) {
-                        errorMessage += 'Error de CORS. Verificar configuración del servidor';
-                    } else {
-                        errorMessage += error.message;
-                    }
-                    
-                    Utils.showNotification(errorMessage, 'error');
-                } finally {
-                    // Restaurar botón
-                    ocrButton.classList.remove('processing');
-                    ocrButton.innerHTML = '📷';
-                    State.isProcessingOCR = false;
-                }
-            }
-        };
-
-        // ==================== SPEECH MANAGER ====================
-        const SpeechManager = {
-            init() {
-                // Verificar soporte para Speech Recognition
-                if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-                    Utils.error('Speech Recognition no soportado en este navegador');
-                    const micButton = document.getElementById('micButton');
-                    micButton.style.display = 'none';
-                    return;
-                }
-
-                const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-                State.recognition = new SpeechRecognition();
-
-                // Configuración optimizada
-                State.recognition.continuous = false;
-                State.recognition.interimResults = true;
-                State.recognition.lang = CONFIG.SPEECH_LANG;
-                State.recognition.maxAlternatives = 1;
-
-                this.setupEventListeners();
-                this.setupButton();
-                
-                Utils.log('🎤 Speech Recognition configurado correctamente');
-            },
-
-            setupEventListeners() {
-                const transcriptDiv = document.getElementById('voiceTranscript');
-                const transcriptText = document.getElementById('transcriptText');
-                const micButton = document.getElementById('micButton');
-                const micText = document.getElementById('micText');
-
-                State.recognition.onstart = () => {
-                    Utils.log('🎤 Reconocimiento de voz iniciado');
-                    State.isListening = true;
-                    micButton.classList.add('recording');
-                    micText.textContent = 'Listening...';
-                    transcriptDiv.style.display = 'block';
-                    transcriptText.textContent = '🎤 Escuchando...';
-                    State.finalTranscript = '';
-                };
-
-                State.recognition.onresult = (event) => {
-                    let interimTranscript = '';
-                    State.finalTranscript = '';
-
-                    for (let i = event.resultIndex; i < event.results.length; i++) {
-                        const transcript = event.results[i][0].transcript;
-                        if (event.results[i].isFinal) {
-                            State.finalTranscript += transcript;
-                        } else {
-                            interimTranscript += transcript;
-                        }
-                    }
-
-                    const displayText = State.finalTranscript + interimTranscript;
-                    if (displayText.trim()) {
-                        transcriptText.textContent = displayText;
-                    }
-
-                    Utils.log('🔊 Texto reconocido:', displayText);
-                };
-
-                State.recognition.onend = () => {
-                    Utils.log('🎤 Reconocimiento de voz terminado');
-                    State.isListening = false;
-                    micButton.classList.remove('recording');
-                    micButton.classList.add('processing');
-                    micText.textContent = 'Processing...';
-
-                    if (State.finalTranscript.trim()) {
-                        const recognizedText = State.finalTranscript.trim();
-                        Utils.log('✅ Texto final reconocido:', recognizedText);
-                        
-                        // ENVIAR DIRECTAMENTE USANDO LA API DE DIALOGFLOW
-                        setTimeout(async () => {
-                            const success = await DialogflowAPI.sendTextMessage(recognizedText);
-                            
-                            transcriptDiv.style.display = 'none';
-                            micButton.classList.remove('processing');
-                            micText.textContent = 'Speak';
-
-                            if (success) {
-                                Utils.showNotification('✅ Audio enviado al agente!', 'success');
-                            } else {
-                                Utils.showNotification('❌ Error enviando audio al agente', 'error');
-                            }
-                        }, 500);
-                    } else {
-                        Utils.showNotification('❌ No se detectó ningún texto en el audio', 'error');
-                        transcriptDiv.style.display = 'none';
-                        micButton.classList.remove('processing');
-                        micText.textContent = 'Speak';
-                    }
-                };
-
-                State.recognition.onerror = (event) => {
-                    Utils.error('Error en reconocimiento de voz:', event.error);
-                    State.isListening = false;
-                    micButton.classList.remove('recording', 'processing');
-                    micText.textContent = 'Speak';
-                    transcriptDiv.style.display = 'none';
-                    
-                    let errorMessage = '❌ Error en reconocimiento de voz';
-                    switch(event.error) {
-                        case 'network':
-                            errorMessage += ': Sin conexión a internet';
-                            break;
-                        case 'not-allowed':
-                            errorMessage += ': Permisos de micrófono denegados';
-                            break;
-                        case 'no-speech':
-                            errorMessage += ': No se detectó ningún audio';
-                            break;
-                        default:
-                            errorMessage += `: ${event.error}`;
-                    }
-                    
-                    Utils.showNotification(errorMessage, 'error');
-                };
-            },
-
-            setupButton() {
-                const micButton = document.getElementById('micButton');
-                
-                micButton.addEventListener('click', () => {
-                    if (!State.isListening) {
-                        try {
-                            State.recognition.start();
-                            Utils.showNotification('🎤 Empezando a escuchar... Habla ahora', 'info');
-                        } catch (error) {
-                            Utils.error('Error iniciando reconocimiento:', error);
-                            Utils.showNotification('❌ Error accediendo al micrófono', 'error');
-                        }
-                    } else {
-                        State.recognition.stop();
-                        Utils.showNotification('⏹️ Deteniendo reconocimiento de voz...', 'info');
-                    }
+                const response = await fetch(CONFIG.OCR_WEBHOOK_URL, {
+                    method: 'POST',
+                    body: formData
                 });
+
+                const result = await response.json();
+                console.log('📄 Respuesta OCR:', result);
+
+                if (result.success && result.extractedText) {
+                    const text = result.extractedText.trim();
+                    
+                    if (text) {
+                        // ENVIAR DIRECTAMENTE AL AGENTE
+                        sendToAgent(text);
+                        showNotification('✅ Texto enviado al agente!', 'success');
+                    } else {
+                        showNotification('⚠️ No se detectó texto', 'error');
+                    }
+                } else {
+                    showNotification('❌ Error extrayendo texto', 'error');
+                }
+
+            } catch (error) {
+                console.error('❌ Error OCR:', error);
+                showNotification('❌ Error procesando imagen', 'error');
+            } finally {
+                ocrButton.classList.remove('processing');
+                ocrButton.innerHTML = '📷';
             }
-        };
+        }
+
+        // ==================== SPEECH RECOGNITION ====================
+        function initSpeech() {
+            if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
+                document.getElementById('micButton').style.display = 'none';
+                return;
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            recognition = new SpeechRecognition();
+
+            recognition.continuous = false;
+            recognition.interimResults = true;
+            recognition.lang = CONFIG.SPEECH_LANG;
+
+            const transcriptDiv = document.getElementById('voiceTranscript');
+            const transcriptText = document.getElementById('transcriptText');
+            const micButton = document.getElementById('micButton');
+            const micText = document.getElementById('micText');
+
+            recognition.onstart = () => {
+                isListening = true;
+                micButton.classList.add('recording');
+                micText.textContent = 'Listening...';
+                transcriptDiv.style.display = 'block';
+                transcriptText.textContent = '🎤 Escuchando...';
+                finalTranscript = '';
+            };
+
+            recognition.onresult = (event) => {
+                let interimTranscript = '';
+                finalTranscript = '';
+
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const transcript = event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += transcript;
+                    } else {
+                        interimTranscript += transcript;
+                    }
+                }
+
+                const displayText = finalTranscript + interimTranscript;
+                if (displayText.trim()) {
+                    transcriptText.textContent = displayText;
+                }
+            };
+
+            recognition.onend = () => {
+                isListening = false;
+                micButton.classList.remove('recording');
+                transcriptDiv.style.display = 'none';
+                micText.textContent = 'Speak';
+
+                if (finalTranscript.trim()) {
+                    // ENVIAR DIRECTAMENTE AL AGENTE
+                    sendToAgent(finalTranscript.trim());
+                    showNotification('✅ Audio enviado al agente!', 'success');
+                } else {
+                    showNotification('❌ No se detectó texto', 'error');
+                }
+            };
+
+            recognition.onerror = (event) => {
+                console.error('❌ Error Speech:', event.error);
+                isListening = false;
+                micButton.classList.remove('recording');
+                micText.textContent = 'Speak';
+                transcriptDiv.style.display = 'none';
+                showNotification('❌ Error en reconocimiento de voz', 'error');
+            };
+
+            // Setup button click
+            micButton.addEventListener('click', () => {
+                if (!isListening) {
+                    try {
+                        recognition.start();
+                        showNotification('🎤 Escuchando...', 'info');
+                    } catch (error) {
+                        showNotification('❌ Error accediendo al micrófono', 'error');
+                    }
+                } else {
+                    recognition.stop();
+                }
+            });
+        }
 
         // ==================== EVENT HANDLERS ====================
         function handleImageUpload(event) {
             const file = event.target.files[0];
             if (!file) return;
 
-            // Validaciones básicas
+            // Validar tipo de archivo
             const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
             if (!validTypes.includes(file.type)) {
-                Utils.showNotification('❌ Tipo de archivo no válido. Usa: JPG, PNG, GIF o WebP', 'error');
+                showNotification('❌ Tipo de archivo no válido', 'error');
                 return;
             }
 
-            Utils.log('📁 Archivo seleccionado:', file.name, 'Tamaño:', (file.size / 1024 / 1024).toFixed(2) + 'MB');
-            
-            OCRManager.processImage(file);
-            event.target.value = ''; // Limpiar input para permitir subir el mismo archivo otra vez
-        }
-
-        function closePreview() {
-            Utils.closePreview();
+            processOCR(file);
+            event.target.value = '';
         }
 
         // ==================== INITIALIZATION ====================
-        function init() {
-            Utils.log('🚀 Inicializando Decision Making Agent...');
+        document.addEventListener('DOMContentLoaded', () => {
+            console.log('🚀 Inicializando...');
             
-            // Esperar a que se cargue Dialogflow Messenger
+            // Esperar a que se cargue df-messenger
             setTimeout(() => {
-                State.dfMessenger = document.querySelector('df-messenger');
-                if (State.dfMessenger) {
-                    Utils.log('✅ Dialogflow Messenger encontrado y cargado');
-                    
-                    // Verificar acceso al shadow DOM
-                    setTimeout(() => {
-                        if (State.dfMessenger.shadowRoot) {
-                            Utils.log('✅ Acceso al Shadow DOM confirmado');
-                        } else {
-                            Utils.log('⚠️ No se pudo acceder al Shadow DOM aún');
-                        }
-                    }, 3000);
+                dfMessenger = document.querySelector('df-messenger');
+                if (dfMessenger) {
+                    console.log('✅ df-messenger listo');
                 } else {
-                    Utils.error('❌ Dialogflow Messenger no encontrado');
+                    console.error('❌ df-messenger no encontrado');
                 }
             }, 2000);
             
-            // Inicializar Speech Recognition
-            SpeechManager.init();
-            
-            // Verificar posibles errores de CORS después de un tiempo
-            setTimeout(() => {
-                const corsError = document.getElementById('corsError');
-                if (!State.dfMessenger?.shadowRoot) {
-                    corsError.style.display = 'block';
-                    Utils.error('❌ CORS Error: Configura tu dominio en Google Dialogflow');
-                }
-            }, 8000);
-
-            Utils.log('✅ Aplicación inicializada correctamente');
-        }
-
-        // ==================== EVENT LISTENERS ====================
-        document.addEventListener('DOMContentLoaded', init);
+            // Inicializar Speech
+            initSpeech();
+        });
 
         document.addEventListener('df-messenger-loaded', () => {
-            Utils.log('✅ Evento df-messenger-loaded disparado');
-            Utils.showNotification('🤖 Chat Agent cargado correctamente', 'success');
+            console.log('✅ df-messenger cargado');
+            showNotification('🤖 Agent listo!', 'success');
         });
-
-        // Listener adicional para cuando el messenger esté completamente listo
-        document.addEventListener('df-request-sent', () => {
-            Utils.log('📤 Mensaje enviado al bot');
-        });
-
-        document.addEventListener('df-response-received', () => {
-            Utils.log('📥 Respuesta recibida del bot');
-        });
-
-        Utils.log('📄 Script cargado - Versión refactorizada');
     </script>
 </body>
 </html>
