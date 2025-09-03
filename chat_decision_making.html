@@ -367,7 +367,6 @@
         let recognition;
         let isListening = false;
         let finalTranscript = '';
-        let interimTranscript = '';
 
         // INICIALIZACIÓN
         document.addEventListener('DOMContentLoaded', function() {
@@ -378,11 +377,6 @@
                 dfMessenger = document.querySelector('df-messenger');
                 if (dfMessenger) {
                     console.log('✅ Dialogflow Messenger cargado');
-                    
-                    // Agregar mensaje de bienvenida
-                    setTimeout(() => {
-                        sendSystemMessage('¡Hola! Puedes escribir mensajes, subir imágenes 📷 o hablar 🎤 para interactuar conmigo.');
-                    }, 1000);
                 }
             }, 2000);
             
@@ -390,139 +384,173 @@
             setupSpeechRecognition();
         });
 
-        // ==================== FUNCIÓN PRINCIPAL PARA ENVIAR COMO USER INPUT ====================
-
-        function sendAsUserMessage(message) {
+        // ==================== FUNCIÓN MEJORADA PARA ENVIAR MENSAJE ====================
+        
+        function sendMessageAsUser(message) {
+            console.log('📤 ENVIANDO MENSAJE COMO USUARIO:', message);
+            
             if (!dfMessenger) {
                 console.error('❌ Dialogflow Messenger no disponible');
                 return;
             }
 
-            console.log('📤 Enviando mensaje como usuario:', message);
-
-            // Método 1: Intentar acceder al input dentro del Shadow DOM
-            setTimeout(() => {
-                try {
-                    const shadowRoot = dfMessenger.shadowRoot;
-                    if (shadowRoot) {
-                        // Buscar diferentes selectores posibles para el input
-                        const inputSelectors = [
-                            'input[type="text"]',
-                            'textarea',
-                            '[contenteditable]',
-                            'input[placeholder*="message"]',
-                            'input[placeholder*="Type"]',
-                            'textarea[placeholder*="message"]',
-                            '.df-messenger-user-input input',
-                            '.df-messenger-user-input textarea',
-                            'df-messenger-user-input input',
-                            'df-messenger-user-input textarea'
-                        ];
-
-                        let chatInput = null;
-                        for (const selector of inputSelectors) {
-                            chatInput = shadowRoot.querySelector(selector);
-                            if (chatInput) break;
-                        }
-
-                        if (chatInput) {
-                            console.log('✅ Input encontrado:', chatInput);
-                            
-                            // Limpiar y establecer el valor
-                            chatInput.value = message;
-                            chatInput.focus();
-
-                            // Disparar todos los eventos necesarios
-                            const events = ['input', 'change', 'keyup'];
-                            events.forEach(eventType => {
-                                chatInput.dispatchEvent(new Event(eventType, { bubbles: true }));
-                            });
-
-                            // Buscar botón de envío
-                            setTimeout(() => {
-                                const sendSelectors = [
-                                    'button[type="submit"]',
-                                    'button[aria-label*="Send"]',
-                                    'button[title*="Send"]',
-                                    '.send-button',
-                                    '.df-messenger-send-button',
-                                    'button:has(svg)',
-                                    '[role="button"]:has(svg)'
-                                ];
-
-                                let sendButton = null;
-                                for (const selector of sendSelectors) {
-                                    try {
-                                        sendButton = shadowRoot.querySelector(selector);
-                                        if (sendButton) break;
-                                    } catch (e) { /* Continuar con el siguiente selector */ }
-                                }
-
-                                if (sendButton) {
-                                    console.log('✅ Botón de envío encontrado');
-                                    sendButton.click();
-                                    
-                                    // Confirmar mensaje enviado
-                                    setTimeout(() => {
-                                        showNotification('✅ Mensaje enviado correctamente!', 'success');
-                                    }, 500);
-                                } else {
-                                    // Fallback: simular Enter
-                                    console.log('⚡ Usando Enter como fallback');
-                                    const enterEvent = new KeyboardEvent('keydown', {
-                                        key: 'Enter',
-                                        code: 'Enter',
-                                        keyCode: 13,
-                                        which: 13,
-                                        bubbles: true
-                                    });
-                                    chatInput.dispatchEvent(enterEvent);
-                                    
-                                    showNotification('✅ Mensaje enviado con Enter!', 'success');
-                                }
-                            }, 200);
-
-                        } else {
-                            console.warn('⚠️ No se encontró el campo de input');
-                            fallbackSendMessage(message);
-                        }
-                    } else {
-                        console.warn('⚠️ No se pudo acceder al Shadow DOM');
-                        fallbackSendMessage(message);
-                    }
-                } catch (error) {
-                    console.error('❌ Error accediendo al Shadow DOM:', error);
-                    fallbackSendMessage(message);
-                }
-            }, 300);
-        }
-
-        // MÉTODO FALLBACK
-        function fallbackSendMessage(message) {
+            // MÉTODO 1: Usar APIs internas de Dialogflow
             try {
-                console.log('🔄 Usando método fallback...');
-                
-                if (dfMessenger && typeof dfMessenger.renderCustomText === 'function') {
-                    dfMessenger.renderCustomText(message, true); // true = mensaje del usuario
-                    showNotification('✅ Mensaje enviado (fallback)!', 'success');
-                } else {
-                    // Último recurso: crear evento personalizado
-                    const event = new CustomEvent('df-request-sent', {
-                        detail: { 
-                            requestBody: { 
-                                queryInput: { 
-                                    text: { text: message, languageCode: 'en' } 
-                                } 
-                            } 
-                        }
-                    });
-                    dfMessenger.dispatchEvent(event);
-                    showNotification('✅ Mensaje enviado (evento)!', 'success');
+                if (dfMessenger.renderCustomText && typeof dfMessenger.renderCustomText === 'function') {
+                    console.log('✅ Método 1: Usando renderCustomText');
+                    dfMessenger.renderCustomText(message, true); // true = mensaje del usuario (burbuja derecha azul)
+                    showNotification('✅ Mensaje enviado correctamente!', 'success');
+                    return;
                 }
             } catch (error) {
-                console.error('❌ Error en fallback:', error);
-                alert('Mensaje procesado: ' + message);
+                console.log('⚠️ Método 1 falló, probando método 2...');
             }
+
+            // MÉTODO 2: Buscar input en Shadow DOM con múltiples intentos
+            let attempts = 0;
+            const maxAttempts = 10;
+            
+            function tryFindInput() {
+                attempts++;
+                console.log(`🔍 Intento ${attempts}/${maxAttempts} - Buscando input...`);
+                
+                try {
+                    const shadowRoot = dfMessenger.shadowRoot;
+                    if (!shadowRoot) {
+                        if (attempts < maxAttempts) {
+                            setTimeout(tryFindInput, 200);
+                        } else {
+                            console.error('❌ No se pudo acceder al Shadow DOM después de varios intentos');
+                        }
+                        return;
+                    }
+
+                    // Lista exhaustiva de posibles selectores
+                    const inputSelectors = [
+                        'input[type="text"]',
+                        'textarea',
+                        'input[aria-label]',
+                        'textarea[aria-label]',
+                        'input[placeholder]',
+                        'textarea[placeholder]',
+                        '[contenteditable="true"]',
+                        '.df-messenger-user-input input',
+                        '.df-messenger-user-input textarea',
+                        'df-messenger-chat input',
+                        'df-messenger-chat textarea',
+                        'df-messenger-chat-bubble input',
+                        'df-messenger-chat-bubble textarea'
+                    ];
+
+                    let chatInput = null;
+                    for (const selector of inputSelectors) {
+                        const elements = shadowRoot.querySelectorAll(selector);
+                        for (const element of elements) {
+                            if (element.offsetParent !== null) { // Elemento visible
+                                chatInput = element;
+                                console.log(`✅ Input encontrado con selector: ${selector}`, element);
+                                break;
+                            }
+                        }
+                        if (chatInput) break;
+                    }
+
+                    if (chatInput) {
+                        // Limpiar, enfocar y escribir
+                        chatInput.value = '';
+                        chatInput.focus();
+                        chatInput.value = message;
+                        
+                        // Disparar eventos
+                        ['input', 'change', 'keyup', 'paste'].forEach(eventType => {
+                            chatInput.dispatchEvent(new Event(eventType, { bubbles: true }));
+                        });
+
+                        console.log('📝 Mensaje escrito en input:', chatInput.value);
+
+                        // Buscar y hacer clic en botón de envío
+                        setTimeout(() => {
+                            const sendSelectors = [
+                                'button[type="submit"]',
+                                'button[aria-label*="Send"]',
+                                'button[aria-label*="send"]',
+                                'button[title*="Send"]',
+                                'button[title*="send"]',
+                                '.send-button',
+                                '[role="button"]',
+                                'button:has(svg)',
+                                'button svg'
+                            ];
+
+                            let sendButton = null;
+                            for (const selector of sendSelectors) {
+                                const buttons = shadowRoot.querySelectorAll(selector);
+                                for (const button of buttons) {
+                                    if (button.offsetParent !== null) {
+                                        sendButton = button.tagName === 'svg' ? button.parentElement : button;
+                                        console.log(`✅ Botón encontrado con selector: ${selector}`, sendButton);
+                                        break;
+                                    }
+                                }
+                                if (sendButton) break;
+                            }
+
+                            if (sendButton) {
+                                console.log('🚀 Haciendo clic en botón de envío');
+                                sendButton.click();
+                                showNotification('✅ Mensaje enviado!', 'success');
+                            } else {
+                                // Fallback: Enter
+                                console.log('⌨️ Botón no encontrado, usando Enter');
+                                const enterEvent = new KeyboardEvent('keydown', {
+                                    key: 'Enter',
+                                    code: 'Enter',
+                                    keyCode: 13,
+                                    which: 13,
+                                    bubbles: true,
+                                    cancelable: true
+                                });
+                                chatInput.dispatchEvent(enterEvent);
+                                showNotification('✅ Mensaje enviado con Enter!', 'success');
+                            }
+                        }, 300);
+
+                    } else if (attempts < maxAttempts) {
+                        console.log('⏳ Input no encontrado, reintentando...');
+                        setTimeout(tryFindInput, 300);
+                    } else {
+                        console.error('❌ No se encontró el campo de input después de varios intentos');
+                        
+                        // MÉTODO 3: Evento personalizado como último recurso
+                        console.log('🔄 Probando evento personalizado...');
+                        try {
+                            const event = new CustomEvent('df-request-sent', {
+                                detail: { 
+                                    requestBody: { 
+                                        queryInput: { 
+                                            text: { text: message, languageCode: 'en' } 
+                                        } 
+                                    } 
+                                }
+                            });
+                            dfMessenger.dispatchEvent(event);
+                            showNotification('✅ Mensaje enviado (evento personalizado)!', 'success');
+                        } catch (error) {
+                            console.error('❌ Todos los métodos fallaron:', error);
+                            showNotification('❌ Error enviando mensaje', 'error');
+                        }
+                    }
+                    
+                } catch (error) {
+                    console.error('❌ Error en tryFindInput:', error);
+                    if (attempts < maxAttempts) {
+                        setTimeout(tryFindInput, 300);
+                    }
+                }
+            }
+            
+            // Iniciar búsqueda del input
+            setTimeout(tryFindInput, 100);
         }
 
         // ==================== OCR FUNCTIONALITY ====================
@@ -562,11 +590,11 @@
                     // Preparar mensaje para enviar como usuario
                     const userMessage = `Analiza este texto extraído de la imagen "${file.name}": ${result.extractedText}`;
                     
-                    showNotification('✅ Texto extraído! Enviando al agente...', 'success');
+                    showNotification('✅ Texto extraído! Enviando...', 'success');
                     
                     // Enviar como mensaje del usuario
                     setTimeout(() => {
-                        sendAsUserMessage(userMessage);
+                        sendMessageAsUser(userMessage);
                         closePreview();
                     }, 1000);
                     
@@ -602,29 +630,27 @@
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
 
-            recognition.continuous = true;
+            recognition.continuous = false;
             recognition.interimResults = true;
-            recognition.lang = 'es-ES'; // Puedes cambiar a 'en-US' si prefieres inglés
+            recognition.lang = 'en-US';
 
             const micButton = document.getElementById('micButton');
             const micText = document.getElementById('micText');
             const transcriptDiv = document.getElementById('voiceTranscript');
             const transcriptText = document.getElementById('transcriptText');
 
-            // Event listeners para el reconocimiento de voz
             recognition.onstart = function() {
                 console.log('🎤 Reconocimiento de voz iniciado');
                 isListening = true;
                 micButton.classList.add('recording');
-                micText.textContent = 'Escuchando...';
+                micText.textContent = 'Listening...';
                 transcriptDiv.style.display = 'block';
-                transcriptText.textContent = 'Escuchando...';
+                transcriptText.textContent = 'Listening...';
                 finalTranscript = '';
-                interimTranscript = '';
             };
 
             recognition.onresult = function(event) {
-                interimTranscript = '';
+                let interimTranscript = '';
                 finalTranscript = '';
 
                 for (let i = event.resultIndex; i < event.results.length; i++) {
@@ -648,7 +674,7 @@
                 isListening = false;
                 micButton.classList.remove('recording');
                 micButton.classList.add('processing');
-                micText.textContent = 'Procesando...';
+                micText.textContent = 'Processing...';
 
                 // Procesar el texto final
                 if (finalTranscript.trim()) {
@@ -656,7 +682,7 @@
                     
                     // Enviar como mensaje del usuario
                     setTimeout(() => {
-                        sendAsUserMessage(finalTranscript.trim());
+                        sendMessageAsUser(finalTranscript.trim());
                         transcriptDiv.style.display = 'none';
                         micButton.classList.remove('processing');
                         micText.textContent = 'Speak';
@@ -675,23 +701,7 @@
                 micButton.classList.remove('recording', 'processing');
                 micText.textContent = 'Speak';
                 transcriptDiv.style.display = 'none';
-                
-                let errorMessage = 'Error en reconocimiento de voz';
-                switch(event.error) {
-                    case 'network':
-                        errorMessage = 'Error de red';
-                        break;
-                    case 'not-allowed':
-                        errorMessage = 'Micrófono no permitido';
-                        break;
-                    case 'no-speech':
-                        errorMessage = 'No se detectó voz';
-                        break;
-                    default:
-                        errorMessage = `Error: ${event.error}`;
-                }
-                
-                showNotification(`❌ ${errorMessage}`, 'error');
+                showNotification('❌ Error en reconocimiento de voz', 'error');
             };
 
             // Click handler para el botón del micrófono
@@ -713,16 +723,6 @@
         }
 
         // ==================== UTILITY FUNCTIONS ====================
-
-        function sendSystemMessage(message) {
-            if (dfMessenger && typeof dfMessenger.renderCustomText === 'function') {
-                try {
-                    dfMessenger.renderCustomText(message, false); // false = mensaje del bot
-                } catch (error) {
-                    console.log('Info del sistema:', message);
-                }
-            }
-        }
 
         function showImagePreview(file) {
             const preview = document.getElementById('imagePreview');
