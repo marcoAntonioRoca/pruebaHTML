@@ -133,6 +133,11 @@
             transform: scale(1.05) !important;
         }
 
+        .ocr-button.processing {
+            background: #ff9800 !important;
+            animation: pulse 1.5s infinite !important;
+        }
+
         .mic-button {
             right: 120px !important;
             min-width: 100px !important;
@@ -146,12 +151,12 @@
             background: #3367d6 !important;
         }
 
-        .processing {
+        .mic-button.processing {
             background: #ff9800 !important;
             animation: pulse 1.5s infinite !important;
         }
 
-        .recording {
+        .mic-button.recording {
             background: #ea4335 !important;
             animation: pulse 2s infinite !important;
         }
@@ -226,6 +231,10 @@
 
         .notification.error {
             background: #ea4335;
+        }
+
+        .notification.info {
+            background: #4285f4;
         }
 
         @keyframes slideDown {
@@ -340,8 +349,9 @@
         const CONFIG = {
             OCR_WEBHOOK_URL: 'https://n8n.fastxo.org/webhook/extract-text',
             SPEECH_LANG: 'en-US',
-            MAX_FIND_ATTEMPTS: 10,
-            RETRY_DELAY: 200
+            MAX_FIND_ATTEMPTS: 15,
+            RETRY_DELAY: 300,
+            NOTIFICATION_DURATION: 4000
         };
 
         // ==================== STATE MANAGEMENT ====================
@@ -349,6 +359,7 @@
             dfMessenger: null,
             recognition: null,
             isListening: false,
+            isProcessingOCR: false,
             finalTranscript: ''
         };
 
@@ -362,7 +373,7 @@
                 
                 setTimeout(() => {
                     notification.style.display = 'none';
-                }, 3000);
+                }, CONFIG.NOTIFICATION_DURATION);
             },
 
             showImagePreview(file) {
@@ -387,6 +398,13 @@
 
             error(message, error = null) {
                 console.error(`❌ ${message}`, error || '');
+            },
+
+            formatText(text) {
+                // Limpiar y formatear el texto extraído
+                return text.trim()
+                    .replace(/\s+/g, ' ') // Reemplazar múltiples espacios por uno solo
+                    .replace(/\n\s*\n/g, '\n'); // Limpiar líneas vacías múltiples
             }
         };
 
@@ -409,21 +427,27 @@
                             return;
                         }
 
+                        // Selectors más específicos para Dialogflow Messenger
                         const selectors = [
                             'input[type="text"]',
                             'textarea',
-                            'input[placeholder]',
-                            'textarea[placeholder]',
+                            'input[placeholder*="message"]',
+                            'textarea[placeholder*="message"]',
+                            'input[placeholder*="Type"]',
+                            'textarea[placeholder*="Type"]',
                             '[contenteditable="true"]',
                             '.df-messenger-user-input input',
-                            '.df-messenger-user-input textarea'
+                            '.df-messenger-user-input textarea',
+                            'df-messenger-user-input input',
+                            'df-messenger-user-input textarea'
                         ];
 
                         for (const selector of selectors) {
                             const elements = State.dfMessenger.shadowRoot.querySelectorAll(selector);
                             for (const element of elements) {
-                                if (element.offsetParent !== null) {
-                                    Utils.log(`Input encontrado con selector: ${selector}`);
+                                // Verificar que el elemento sea visible y editable
+                                if (element.offsetParent !== null && !element.disabled && !element.readOnly) {
+                                    Utils.log(`✅ Input encontrado con selector: ${selector}`);
                                     resolve(element);
                                     return;
                                 }
@@ -441,28 +465,49 @@
                 });
             },
 
-            async putTextInField(text) {
-                Utils.log('Colocando texto en el campo de input:', text);
+            async insertTextInInput(text) {
+                Utils.log('📝 Insertando texto en el campo de input:', text.substring(0, 100) + '...');
                 
                 try {
                     const inputField = await this.findInputField();
                     
-                    // Limpiar y colocar el texto
+                    // Formatear el texto antes de insertarlo
+                    const formattedText = Utils.formatText(text);
+                    
+                    // Método 1: Limpiar y establecer valor
                     inputField.value = '';
                     inputField.focus();
-                    inputField.value = text;
                     
-                    // Disparar eventos para que se reconozca el cambio
-                    ['input', 'change', 'keyup'].forEach(eventType => {
-                        inputField.dispatchEvent(new Event(eventType, { bubbles: true }));
+                    // Método 2: Usar document.execCommand si está disponible (mejor para mantener el cursor)
+                    if (document.execCommand) {
+                        inputField.select();
+                        document.execCommand('insertText', false, formattedText);
+                    } else {
+                        inputField.value = formattedText;
+                    }
+                    
+                    // Método 3: Disparar eventos para que Dialogflow detecte el cambio
+                    const events = ['input', 'change', 'keyup', 'keydown', 'focus'];
+                    events.forEach(eventType => {
+                        const event = new Event(eventType, { 
+                            bubbles: true, 
+                            cancelable: true 
+                        });
+                        inputField.dispatchEvent(event);
                     });
 
-                    Utils.log('Texto colocado exitosamente en el input');
-                    Utils.showNotification('✅ Texto colocado! Presiona Enter para enviar', 'success');
+                    // Mantener el foco en el campo para que el usuario pueda editar o enviar
+                    inputField.focus();
+
+                    Utils.log('✅ Texto insertado exitosamente');
+                    Utils.showNotification('✅ Texto colocado en el campo! Puedes editarlo y presionar Enter para enviar', 'success');
+                    
+                    return true;
                     
                 } catch (error) {
-                    Utils.error('Error colocando texto en el campo:', error);
-                    Utils.showNotification('❌ Error colocando texto en el campo', 'error');
+                    Utils.error('Error insertando texto en el campo:', error);
+                    Utils.showNotification('❌ Error colocando texto en el campo de mensaje', 'error');
+                    return false;
                 }
             }
         };
@@ -470,7 +515,13 @@
         // ==================== OCR MANAGER ====================
         const OCRManager = {
             async processImage(file) {
-                Utils.log('Procesando imagen:', file.name);
+                if (State.isProcessingOCR) {
+                    Utils.showNotification('⏳ Ya hay una imagen siendo procesada...', 'info');
+                    return;
+                }
+
+                State.isProcessingOCR = true;
+                Utils.log('📷 Procesando imagen para OCR:', file.name);
                 
                 const ocrButton = document.getElementById('ocrButton');
                 ocrButton.classList.add('processing');
@@ -480,37 +531,80 @@
                 Utils.showImagePreview(file);
 
                 try {
+                    // Validar el archivo
+                    if (file.size > 10 * 1024 * 1024) { // 10MB
+                        throw new Error('La imagen es demasiado grande. Máximo 10MB.');
+                    }
+
                     const formData = new FormData();
                     formData.append('file', file);
 
+                    Utils.log('📤 Enviando imagen al webhook N8N...');
+                    
                     const response = await fetch(CONFIG.OCR_WEBHOOK_URL, {
                         method: 'POST',
-                        body: formData
+                        body: formData,
+                        headers: {
+                            // No establecer Content-Type para FormData, el browser lo hará automáticamente
+                        }
                     });
 
-                    const result = await response.json();
-                    Utils.log('Respuesta del webhook OCR:', result);
+                    Utils.log('📥 Respuesta del servidor:', response.status, response.statusText);
 
-                    if (result.success && result.extractedText) {
-                        Utils.showNotification('✅ Texto extraído! Colocado en el campo de texto', 'success');
+                    if (!response.ok) {
+                        throw new Error(`Error del servidor: ${response.status} ${response.statusText}`);
+                    }
+
+                    const result = await response.json();
+                    Utils.log('📋 Respuesta del webhook OCR:', result);
+
+                    // Verificar la estructura de respuesta
+                    if (result && result.success && result.extractedText) {
+                        const extractedText = result.extractedText.trim();
                         
-                        // Colocar el texto extraído en el campo de input
-                        setTimeout(() => {
-                            InputManager.putTextInField(result.extractedText);
-                            Utils.closePreview();
-                        }, 1000);
+                        if (extractedText.length > 0) {
+                            Utils.log(`✅ Texto extraído exitosamente: ${extractedText.length} caracteres`);
+                            
+                            // PASO CRÍTICO: Insertar el texto extraído en el campo de input
+                            // El usuario deberá presionar Enter manualmente para enviar
+                            const success = await InputManager.insertTextInInput(extractedText);
+                            
+                            if (success) {
+                                Utils.showNotification('✅ Texto extraído y colocado! Presiona Enter para enviar', 'success');
+                            }
+                            
+                            // Cerrar la vista previa después de un momento
+                            setTimeout(() => {
+                                Utils.closePreview();
+                            }, 2000);
+                            
+                        } else {
+                            Utils.showNotification('⚠️ No se detectó texto en la imagen', 'error');
+                        }
                         
                     } else {
-                        Utils.showNotification('❌ No se pudo extraer texto de la imagen', 'error');
-                        Utils.error('Error en OCR:', result);
+                        const errorMsg = result?.error || result?.message || 'Respuesta inválida del servidor';
+                        throw new Error(`Error en OCR: ${errorMsg}`);
                     }
 
                 } catch (error) {
-                    Utils.showNotification('❌ Error procesando imagen: ' + error.message, 'error');
-                    Utils.error('Error en handleImageUpload:', error);
+                    Utils.error('Error procesando imagen:', error);
+                    let errorMessage = '❌ Error procesando imagen: ';
+                    
+                    if (error.name === 'TypeError' && error.message.includes('fetch')) {
+                        errorMessage += 'No se pudo conectar al servicio OCR';
+                    } else if (error.message.includes('CORS')) {
+                        errorMessage += 'Error de CORS. Verificar configuración del servidor';
+                    } else {
+                        errorMessage += error.message;
+                    }
+                    
+                    Utils.showNotification(errorMessage, 'error');
                 } finally {
+                    // Restaurar botón
                     ocrButton.classList.remove('processing');
                     ocrButton.innerHTML = '📷';
+                    State.isProcessingOCR = false;
                 }
             }
         };
@@ -518,23 +612,27 @@
         // ==================== SPEECH MANAGER ====================
         const SpeechManager = {
             init() {
+                // Verificar soporte para Speech Recognition
                 if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
                     Utils.error('Speech Recognition no soportado en este navegador');
-                    document.getElementById('micButton').style.display = 'none';
+                    const micButton = document.getElementById('micButton');
+                    micButton.style.display = 'none';
                     return;
                 }
 
                 const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
                 State.recognition = new SpeechRecognition();
 
+                // Configuración optimizada
                 State.recognition.continuous = false;
                 State.recognition.interimResults = true;
                 State.recognition.lang = CONFIG.SPEECH_LANG;
+                State.recognition.maxAlternatives = 1;
 
                 this.setupEventListeners();
                 this.setupButton();
                 
-                Utils.log('Speech Recognition configurado correctamente');
+                Utils.log('🎤 Speech Recognition configurado correctamente');
             },
 
             setupEventListeners() {
@@ -544,12 +642,12 @@
                 const micText = document.getElementById('micText');
 
                 State.recognition.onstart = () => {
-                    Utils.log('Reconocimiento de voz iniciado');
+                    Utils.log('🎤 Reconocimiento de voz iniciado');
                     State.isListening = true;
                     micButton.classList.add('recording');
                     micText.textContent = 'Listening...';
                     transcriptDiv.style.display = 'block';
-                    transcriptText.textContent = 'Listening...';
+                    transcriptText.textContent = '🎤 Escuchando...';
                     State.finalTranscript = '';
                 };
 
@@ -570,26 +668,36 @@
                     if (displayText.trim()) {
                         transcriptText.textContent = displayText;
                     }
+
+                    Utils.log('🔊 Texto reconocido:', displayText);
                 };
 
                 State.recognition.onend = () => {
-                    Utils.log('Reconocimiento de voz terminado');
+                    Utils.log('🎤 Reconocimiento de voz terminado');
                     State.isListening = false;
                     micButton.classList.remove('recording');
                     micButton.classList.add('processing');
                     micText.textContent = 'Processing...';
 
                     if (State.finalTranscript.trim()) {
-                        Utils.log('Texto reconocido:', State.finalTranscript);
+                        const recognizedText = State.finalTranscript.trim();
+                        Utils.log('✅ Texto final reconocido:', recognizedText);
                         
-                        setTimeout(() => {
-                            InputManager.putTextInField(State.finalTranscript.trim());
+                        // PASO CRÍTICO: Insertar el texto reconocido en el campo de input
+                        // El usuario deberá presionar Enter manualmente para enviar
+                        setTimeout(async () => {
+                            const success = await InputManager.insertTextInInput(recognizedText);
+                            
                             transcriptDiv.style.display = 'none';
                             micButton.classList.remove('processing');
                             micText.textContent = 'Speak';
+
+                            if (success) {
+                                Utils.showNotification('✅ Audio convertido a texto! Presiona Enter para enviar', 'success');
+                            }
                         }, 500);
                     } else {
-                        Utils.showNotification('❌ No se detectó ningún texto', 'error');
+                        Utils.showNotification('❌ No se detectó ningún texto en el audio', 'error');
                         transcriptDiv.style.display = 'none';
                         micButton.classList.remove('processing');
                         micText.textContent = 'Speak';
@@ -602,7 +710,23 @@
                     micButton.classList.remove('recording', 'processing');
                     micText.textContent = 'Speak';
                     transcriptDiv.style.display = 'none';
-                    Utils.showNotification('❌ Error en reconocimiento de voz', 'error');
+                    
+                    let errorMessage = '❌ Error en reconocimiento de voz';
+                    switch(event.error) {
+                        case 'network':
+                            errorMessage += ': Sin conexión a internet';
+                            break;
+                        case 'not-allowed':
+                            errorMessage += ': Permisos de micrófono denegados';
+                            break;
+                        case 'no-speech':
+                            errorMessage += ': No se detectó ningún audio';
+                            break;
+                        default:
+                            errorMessage += `: ${event.error}`;
+                    }
+                    
+                    Utils.showNotification(errorMessage, 'error');
                 };
             },
 
@@ -613,13 +737,14 @@
                     if (!State.isListening) {
                         try {
                             State.recognition.start();
-                            Utils.showNotification('🎤 Empezando a escuchar...', 'info');
+                            Utils.showNotification('🎤 Empezando a escuchar... Habla ahora', 'info');
                         } catch (error) {
                             Utils.error('Error iniciando reconocimiento:', error);
                             Utils.showNotification('❌ Error accediendo al micrófono', 'error');
                         }
                     } else {
                         State.recognition.stop();
+                        Utils.showNotification('⏹️ Deteniendo reconocimiento de voz...', 'info');
                     }
                 });
             }
@@ -630,8 +755,17 @@
             const file = event.target.files[0];
             if (!file) return;
 
+            // Validaciones básicas
+            const validTypes = ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp'];
+            if (!validTypes.includes(file.type)) {
+                Utils.showNotification('❌ Tipo de archivo no válido. Usa: JPG, PNG, GIF o WebP', 'error');
+                return;
+            }
+
+            Utils.log('📁 Archivo seleccionado:', file.name, 'Tamaño:', (file.size / 1024 / 1024).toFixed(2) + 'MB');
+            
             OCRManager.processImage(file);
-            event.target.value = ''; // Limpiar input
+            event.target.value = ''; // Limpiar input para permitir subir el mismo archivo otra vez
         }
 
         function closePreview() {
@@ -640,41 +774,60 @@
 
         // ==================== INITIALIZATION ====================
         function init() {
-            Utils.log('Inicializando aplicación...');
+            Utils.log('🚀 Inicializando Decision Making Agent...');
             
             // Esperar a que se cargue Dialogflow Messenger
             setTimeout(() => {
                 State.dfMessenger = document.querySelector('df-messenger');
                 if (State.dfMessenger) {
-                    Utils.log('Dialogflow Messenger cargado');
+                    Utils.log('✅ Dialogflow Messenger encontrado y cargado');
+                    
+                    // Verificar acceso al shadow DOM
+                    setTimeout(() => {
+                        if (State.dfMessenger.shadowRoot) {
+                            Utils.log('✅ Acceso al Shadow DOM confirmado');
+                        } else {
+                            Utils.log('⚠️ No se pudo acceder al Shadow DOM aún');
+                        }
+                    }, 3000);
                 } else {
-                    Utils.error('Dialogflow Messenger no encontrado');
+                    Utils.error('❌ Dialogflow Messenger no encontrado');
                 }
             }, 2000);
             
-            // Configurar Speech Recognition
+            // Inicializar Speech Recognition
             SpeechManager.init();
             
-            // Verificar CORS después de un tiempo
+            // Verificar posibles errores de CORS después de un tiempo
             setTimeout(() => {
                 const corsError = document.getElementById('corsError');
                 if (!State.dfMessenger?.shadowRoot) {
                     corsError.style.display = 'block';
-                    Utils.error('CORS Error: Configura tu dominio en Google Dialogflow');
+                    Utils.error('❌ CORS Error: Configura tu dominio en Google Dialogflow');
                 }
-            }, 5000);
+            }, 8000);
+
+            Utils.log('✅ Aplicación inicializada correctamente');
         }
 
         // ==================== EVENT LISTENERS ====================
         document.addEventListener('DOMContentLoaded', init);
 
         document.addEventListener('df-messenger-loaded', () => {
-            Utils.log('Dialogflow Messenger cargado correctamente');
-            Utils.log('📷 OCR integrado y listo');
-            Utils.log('🎤 Speech Recognition integrado y listo');
+            Utils.log('✅ Evento df-messenger-loaded disparado');
+            Utils.showNotification('🤖 Chat Agent cargado correctamente', 'success');
         });
 
-        Utils.log('Script cargado correctamente');
+        // Listener adicional para cuando el messenger esté completamente listo
+        document.addEventListener('df-request-sent', () => {
+            Utils.log('📤 Mensaje enviado al bot');
+        });
+
+        document.addEventListener('df-response-received', () => {
+            Utils.log('📥 Respuesta recibida del bot');
+        });
+
+        Utils.log('📄 Script cargado - Versión refactorizada');
     </script>
 </body>
 </html>
